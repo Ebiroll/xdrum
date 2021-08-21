@@ -1,0 +1,170 @@
+
+README file for xdrum
+
+(c) 2021 Olof Åstrand
+(c) 1995,1996,1997  Olof Astrand
+
+This is a rellay old program that requires OSS or a gravis ultrasound card.
+
+https://en.wikipedia.org/wiki/Gravis_Ultrasound
+
+It should be possible to compile with ALSA oss 
+https://wiki.archlinux.org/title/Advanced_Linux_Sound_Architecture#OSS_compatibility
+
+
+pacman -S libxaw
+
+
+What is xdrum?
+==============
+Xdrum is an X-windows based drum machine with Athena widgets.
+It uses VoxWare and supports any sound-card with an 
+/dev/dsp device. Preferably 16-bits, but can be compiled for
+8-bits. It also supports GUS, which makes it run really comfortably.
+It comes with a small collection of raw data samples and
+can be extended with you own raw data 44 kHz samples.
+
+Linn drum samples
+=================
+Some drumpacks refer to these samples.
+https://www.synthtopia.com/content/2016/09/21/free-linndrum-tape-drum-sample-library/
+
+GUS
+===
+Gravis ultrasound soundcard,
+
+Revision history,
+
+1.5 28/9 -96 (DRUMS_ROOT patch by mnalis@jagor.srce.hr)
+
+   Also digital delay was added. I know that the scroll controls 
+   doesnt pop up with the proper settings. If you want to play with the delay 
+   controls, let them stay active (dont push OK). 
+   Just move them somewhere else on the screen. 	
+
+   As an extra bonus. When loading or saving a song, You can push return and
+   start load/save. Prior version inserted \r in filename. Used to be annoying.	
+
+HOW TO Compile
+=============
+
+(1) make  [gus|other|stereo]
+
+This will work fine in most cases. Otherwise you must modify something.
+Most probably the makefile.
+The /usr/X11R6/include part in the makefile should probably be replaced.
+Also you can replace \"`pwd`"\ with the directory where you want to put your
+samples and songs. (i.e. \"/home/olaas/xdrum\")
+
+ 
+If you only have an 8-bit soundcard, put comments around:
+#define SC16BITS 
+In the file sbdrum.c
+
+
+If you have a GUS card try making a symbolic link named patch to /dos/ultrasnd/midi or
+wherever you store your .pat files. This way you can use the DRUMS.GUS file
+by typing cp DRUMS.GUS DRUMS.
+
+
+THE GUI (Users guide)
+=======================
+
+You will figure it out quickly. Just try to remember that
+1) Every pattern is named after a key on the keyboard.
+2) Use only the letters.
+3) If you press SHIFT-and-key then the present pattern is copied
+into the new pattern. 
+4) You MUST have the pointer in the field for all the drums or in the 
+beat field when you change the pattern with the keyboard.
+5) The first play-button is for pattern play. The second play-button
+is for songplay.
+6) Newline in song is not played. (Just don't use two consecutive newlines.)
+7) Press patt: to get an overview of pattern
+
+Easy GUI modifications (DRUMS file)
+==================================
+
+If you want to change the name of a drum. Modify the DRUMS file.
+Be careful and follow this format:
+1) Name of button
+2) <tab>
+3) filename to load
+4) <tab>
+5) Column number.. Must be an increasing number (In order). 1-6..
+6) <tab>
+7) PAN -128 to 128 (affects GUS version only)
+8) <tab>
+9) Volume (Not implemented yet.)
+10) <tab>
+11) 1=Intel format file, 0=Motorola format, 7=Patch file format (GUS Users) 
+If your 44 kHz samples make a lot of noise. Try changing the last number.
+If it doesnt help its probably not raw data samples.
+9) <tab>
+10) Assign key. (GUS only)
+12) <newline>
+
+If you have entered the numbers correctly you will have something that
+looks like:
+
+LoKick	samples/LoKick	1	-20	1	1	60
+Snare	samples/RSnare	2	30	1	1	60
+
+
+
+If you have a gus card you might want to try:
+
+Steel	patch/steeldrm.pat	2	30	1	7	60
+
+The 7 at the end tells the program that this is a patchfile. 
+The 60 at the very end is where the sample should be played.(60=Middle C)
+
+Copyright etc..
+===============
+
+The MIT License (MIT)
+
+Copyright (c) 2021 Olof Åstrand
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE. 
+
+
+PROBLEMS
+========
+
+
+
+THANX....
+=========
+
+Linus Thorvalds (of course!)
+Hannu Savolainen (for VoxWare/USS) 
+GNU-hackers (for a great job)
+Kenneth Olofsson (for testing)
+You (for reading this far)
+Arne Di Russo (for the xdrum homepage)
+Matija Nalis (for the DRUMS_ROOT patch)
+
+
+
+
+
+
+
+
