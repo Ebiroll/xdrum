@@ -8,11 +8,23 @@ This is a rellay old program that requires OSS or a gravis ultrasound card.
 
 https://en.wikipedia.org/wiki/Gravis_Ultrasound
 
-It should be possible to compile with ALSA oss 
+It is possible to compile with ALSA oss 
 https://wiki.archlinux.org/title/Advanced_Linux_Sound_Architecture#OSS_compatibility
 
 
 pacman -S libxaw
+
+
+On arch linux with ALSA I got it to run as follows
+
+make stereo
+
+As root,
+pacman -S libxaw
+
+modprobe snd_seq_oss
+modprobe -v snd_pcm_oss
+modprobe -v snd_mixer_oss
 
 
 What is xdrum?
