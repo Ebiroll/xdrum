@@ -1,0 +1,18 @@
+compilation options:
+
+ANSI_TERMINAL
+enables ANSI screen control codes
+
+PC_TERMINAL
+enables screen control codes suited for PC
+
+If neither of above are #defined, no screen control codes are
+printed. The compiler will warn about some empty strings, but
+you can safely ignore these warnings.
+Also, if screen control codes are disabled, 3MU will always
+behave as if the command line option -j 0 had been specified.
+Therefore no process indication is currently possible on
+terminals without screen controlling possible.
+
+By default, ANSI_TERMINAL is enabled when compiled on an AMIGA or unix,
+and PC_TERMINAL is enabled on a MSDOS thing.

@@ -1,0 +1,715 @@
+/*
+ *              (C) Olof Astrand, 1995
+ *      See README file for details.
+ *
+ *      $Date: 1996/03/23 20:16:49 $
+ *      $Revision: 1.5 $
+ * 
+ */
+
+/* Modify this part if you have GUS or want 8-bits*/ 
+
+/* Leave the rest */
+#ifdef DEBUG
+#define debug(f,x)        fprintf(stderr,f,x);
+#else
+#define debug(f,x)        {  }
+#endif
+
+#define MAX_VOICE    10
+#define BL 4096 
+int L_MAX_DRUMS=20;
+
+
+#include <stdio.h>
+#include <math.h>
+#include <string.h>
+#include <malloc.h>
+
+#include "drum.h"
+#include <assert.h>
+#include <windows.h>
+#include <dsound.h>
+
+// Direct Sound stuff
+LPDIRECTSOUND           lpDS = NULL;
+LPDIRECTSOUNDBUFFER     lpDSB = NULL;
+
+DWORD	BufferLength=BL*48;
+DWORD	PlayId;
+DWORD	MyWritePos=0;
+DWORD	StartTime;
+
+
+#define MIN(a, b)		((a) < (b) ? (a) : (b))
+
+
+#define SLEN 265535
+
+int LeftOfBlock=BL;
+int BlockCounter=0;
+int BlockReady;
+
+//char            data[BL];
+WORD			data[BL*2];
+long            tmpstore[SLEN];
+
+typedef struct  {
+   short *pointer;
+   int count;
+   int length;
+   int on;
+} tVoice;
+
+tVoice Voice[MAX_VOICE];
+
+extern int PatternIndex;
+
+tDrum         Drum[MAX_DRUMS];
+/* YOHOOO OLAAS Use Drum */
+extern tPattern      Pattern [MAX_PATTERNS];
+
+/* Pattern is our primary source of information. */
+/* At least in this application. */
+
+int Playing=0;
+int samplenr=0;
+ 
+
+int             tmp;
+double          this_time, next_time;
+int channel=0;
+int Beat=0;  /* This keeps track of the beat */
+
+extern int BPM;
+/* OLAAS TODO 
+extern int BPM;
+extern int M;
+*/
+
+void  PlayPattern(int Patt,int Measure);
+int OpenBuffer(void);
+
+
+DWORD PlayThread(LPVOID param) {
+	HRESULT dsRV;
+	DWORD PlayPos;
+	DWORD WritePos;
+
+	DWORD StartPos;
+// BufferLength
+
+	if (lpDSB==NULL) {
+		return(0);
+	}
+
+	StartTime=GetTickCount();
+// dsRV=lpDSB->Play(0,0,DSBPLAY_LOOPING);
+	dsRV=lpDSB->SetCurrentPosition(0);
+	dsRV=lpDSB->GetCurrentPosition(&StartPos,&WritePos);
+
+	dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+
+//	while (MyWritePos<(PlayPos+20*BL)) {
+//			PlayPattern(PatternIndex,0);
+//			dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+//		}
+	PlayPattern(PatternIndex,0);
+	PlayPattern(PatternIndex,0);
+	PlayPattern(PatternIndex,0);
+
+	dsRV=lpDSB->SetCurrentPosition(0);
+	dsRV=lpDSB->Play(0,0,DSBPLAY_LOOPING);
+	StartTime=GetTickCount();
+	while(Playing==1) {
+		// Sleep(20);
+//		dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+//		while ((MyWritePos+BL)%BufferLength>PlayPos) {
+//		   Sleep(1);
+//		   dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+//		}
+//		PlayPattern(PatternIndex,0);
+//		PlayPattern(PatternIndex,0);
+		PlayPattern(PatternIndex,0);
+	}
+   dsRV=lpDSB->Stop();
+ return(0);
+}
+
+/*                 
+ *      EmptyCard
+ * 
+ * Removes all loaded samples from the card
+ * 
+ * 
+ *  
+ */
+
+int EmptyCard (void)
+{
+
+int i,voi;
+   
+   for(i=0;i<MAX_DRUMS;i++)  {
+      Drum[i].Loaded=0;
+
+   }
+
+   for (voi=0;voi<MAX_VOICE;voi++)  {
+		Voice[voi].count=-1;
+	  }
+/* Todo Fix Memory Leakage */   
+return(1);
+}
+
+void InitPattern(void);
+
+int InitPlayer(HWND hWnd)
+{
+
+int i;
+HRESULT dsRV;
+ 
+   InitPattern();
+   
+   EmptyCard(); 
+/* Just to make sure ... */
+	
+
+	for(i=0;i<MAX_DRUMS;i++)  {
+      Drum[i].Loaded=0;
+   }
+
+dsRV = DirectSoundCreate( NULL, &lpDS, NULL );
+
+if(dsRV!=DS_OK)  {
+	lpDS = NULL;
+	return (-1);
+}
+
+lpDS->SetCooperativeLevel(hWnd,DSSCL_NORMAL);   
+
+if (OpenBuffer()<0) {
+	return(-1);
+}
+
+   
+return(1);
+}
+
+
+int CleanUpPlayer(void) {
+
+
+Playing=0;
+Sleep(1000);
+
+if (lpDSB!=NULL) {
+	lpDSB->Release();
+	lpDSB=NULL;
+}
+
+if (lpDS!=NULL) {
+//	IDirectSound_Release(lpDS);
+	// lpDS->lpVtbl->Release(lpDS);
+	lpDS->Release();
+	lpDS=NULL;
+}
+
+
+
+
+return (1);
+}
+
+int StartPlayer(void) {
+	Playing=1;
+	HANDLE	hTR;
+	HRESULT dsRV;
+	BYTE	*pbData=NULL;
+	BYTE	*pbData2=NULL;
+	DWORD	dwLength;
+	DWORD	dwLength2;
+
+
+	hTR=CreateThread(NULL,0,(LPTHREAD_START_ROUTINE) PlayThread,
+					(LPVOID) 0,0,&PlayId);
+	
+
+//	if (hTR!=0) {
+//		SetThreadPriority(hTR,THREAD_PRIORITY_TIME_CRITICAL); 
+//	}	
+
+	
+	return (1);
+}
+
+
+int OpenBuffer() {	
+	DSBUFFERDESC	dsbd;
+	int i;	
+	HRESULT dsRV;
+	PCMWAVEFORMAT  WF;
+
+if (lpDS==NULL) {
+	return (-1);
+}
+
+if (lpDSB!=NULL) {
+	lpDSB->Release();
+	lpDSB=NULL;
+}
+
+// Drum[1].length=len;
+// Drum[1].sample
+
+memset( &WF,0,sizeof(PCMWAVEFORMAT));
+memset( &dsbd, 0, sizeof( DSBUFFERDESC ));
+dsbd.dwSize = sizeof( DSBUFFERDESC );
+dsbd.dwFlags = DSBCAPS_CTRLDEFAULT;
+dsbd.dwBufferBytes = BufferLength;
+
+/* Set Format properties according to the WAVE file we just opened */
+WF.wf.wFormatTag=WAVE_FORMAT_PCM;
+WF.wf.nChannels=1;
+WF.wf.nSamplesPerSec=44100;
+WF.wf.nAvgBytesPerSec=44100*2;
+WF.wf.nBlockAlign=2;
+WF.wBitsPerSample=16;
+// WF.cbSize=0;
+
+dsbd.lpwfxFormat =(LPWAVEFORMATEX) &WF;
+// wiWave.pwfx;
+// CreateSoundBuffer(&dsbd,&l
+dsRV=lpDS->CreateSoundBuffer( &dsbd,
+                              &lpDSB,
+                              NULL );
+if (dsRV!=DS_OK) {
+	lpDSB=NULL;
+	return(-1);
+}
+
+return(1);
+}
+int StopPlayer(void){
+	Playing=0;	
+	Sleep(1000);
+	return(1);	
+};
+
+
+
+
+unsigned short
+intelize (unsigned short v)
+{
+  return ((v & 0xff) << 8) | ((v >> 8) & 0xff);
+}
+
+unsigned long
+intelize4 (unsigned long v)
+{
+  return
+  (((v >> 16) & 0xff) << 8) | (((v >> 16) >> 8) & 0xff) |
+  (((v & 0xff) << 8) | ((v >> 8) & 0xff) << 16);
+}
+
+
+
+/* returns how often PlayPattern should be called */
+unsigned long GetUpdateIntervall(int PattI)  {
+unsigned long l;
+
+
+   l=(unsigned long)(1000*BL/44000);    
+   
+//   PlayPattern(PattI,0);
+   return (l);   				 
+}
+
+/*                 
+ *      LoadSample    
+ * 
+ * Load a sample with filename name into patch with pan.
+ * 
+ *  Return the instrument number 
+ * 
+ * */
+int LoadSample (int samplenum,char *name,int pan,int Type)
+{
+   FILE			*sample_fd;
+   int             i,j;
+   int             len,totLen;
+   char            tmpdata[SLEN];
+   char            tmpdata2[SLEN];
+   
+   
+   if ((sample_fd = fopen (name, "rb")) == NULL)
+     {
+		return -1;
+     }
+
+   i=samplenum;
+   len=1;
+   totLen=-1;
+   while (len>0) {
+    totLen+=len;
+    len=fread(&tmpdata[totLen],sizeof(char),SLEN,sample_fd);
+ 
+   }   
+   
+   // fprintf(stderr,"len=%d",len);
+   
+   assert(totLen>0);
+   assert(totLen<SLEN);
+   
+   Drum[i].length=totLen;
+   Drum[i].sample=(short *)calloc(totLen+4,sizeof(short));
+   
+   if (Type==0)  {
+      
+      for (j=0;j<len -1;)  {
+		tmpdata2[j+1]=(char)(tmpdata[j]); 
+		tmpdata2[j]=(char)(tmpdata[j+1]); 
+		j+=2;
+      }
+      memcpy(Drum[i].sample,tmpdata2,totLen);
+   } else  {
+       memcpy(Drum[i].sample,tmpdata,totLen);
+   }
+
+   Drum[i].Loaded=1;
+
+   fclose (sample_fd);
+   return (1);
+}
+
+void InitPattern()  {
+ int i,j,k;
+ 
+   for(i=0;i<MAX_DRUMS;i++)  {
+      Drum[i].Filename=NULL;
+   }
+   
+   for (k=0;k<MAX_PATTERNS;k++)  {
+      for (j=0;j<MAX_DRUMS;j++) { 
+	 Pattern[k].DrumPattern[j].Drum=NULL;
+	 for (i=0;i<16;i++) {
+	    Pattern[k].DrumPattern[j].beat[i]=0;
+	 }
+      }
+   }
+}
+
+   
+/* Parse The Drums file that defines the drums we want to use in this setup */   
+void  ParseDrums(char *FileName)
+{
+   FILE *drum_fd;
+   int sn=0,i,Intel,KeyA;
+   char buff[512];
+   char name[512];
+   char filename[512];
+   int vol,pan,col;
+   
+   if ((drum_fd = fopen ("c:\\wdrum\\Xdrum\\DRUMS.INI","r"))==NULL)
+     {
+		return;
+     }
+   
+   while (fgets(buff,512,drum_fd)) {	
+      sscanf(buff,"%s\t%s\t%d\t%d\t%d\t%d\t%d",name,filename,&col,&pan,&vol,&Intel,&KeyA);
+      /* sn=load_sample(filename,pan,Intel); */
+	 i=0;
+	 Pattern[i].DrumPattern[sn].Drum=(pDrum)&Drum[sn];
+	 Pattern[i].DrumPattern[sn].Drum->SampleNum=sn;
+	 Pattern[i].DrumPattern[sn].Drum->Name=(char *)calloc(2+strlen(name),
+								 sizeof(char));
+	 strcpy(Pattern[i].DrumPattern[sn].Drum->Name,name);
+	 Pattern[i].DrumPattern[sn].Drum->Filename=(char *)calloc(2+strlen(filename),sizeof(char));
+	 strcpy(Pattern[i].DrumPattern[sn].Drum->Filename,filename);
+	 Pattern[i].DrumPattern[sn].Drum->col=col;
+	 Pattern[i].DrumPattern[sn].Drum->pan=pan;
+	 Pattern[i].DrumPattern[sn].Drum->vol=vol;
+         Pattern[i].DrumPattern[sn].Drum->key=KeyA;
+	 Pattern[i].DrumPattern[sn].Drum->Filetype=Intel;
+	 
+	 for(i=1;i<MAX_PATTERNS;i++)  {
+	    Pattern[i].DrumPattern[sn].Drum=&Drum[sn];
+	 }
+     sn++;
+
+   }
+   fclose(drum_fd);
+}
+
+
+
+/*
+ *  WRITE  NOGUS version writes buffer
+ * 
+ * 
+ */
+int WRITE(int i) {
+	BYTE	*pbData=NULL;
+	BYTE	*pbData2=NULL;
+	DWORD	dwLength;
+	DWORD	dwLength2;
+	DWORD	PlayPos,WritePos;
+	static DWORD	LastPlayPos=0;
+	HRESULT dsRV;
+	static DWORD BytesAhead=0;
+	static DWORD LastTime=StartTime;
+	static struct {
+		DWORD   Ticks;
+		DWORD   Read;
+		DWORD	Write;
+		DWORD	MyPlay;
+		DWORD   MWP;
+		DWORD	BA;
+		BYTE	*Data;
+	}LastPos[600];
+	static int j=0;
+
+	
+// Use BL for each Lock size call...
+
+	dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+	LastPos[j].Read=PlayPos;
+	LastPos[j].Ticks=GetTickCount()-LastTime;
+	LastPos[j].MyPlay=(DWORD )88*(GetTickCount()-StartTime);
+	LastPos[j].MWP=MyWritePos;
+	LastPos[j].Write=WritePos;
+	LastPos[j].BA=BytesAhead;
+
+	if (j==599) {
+		j=0;
+	}
+
+	// GetTickCount();
+
+//	PlayPos=(DWORD )(88,2*(GetTickCount()-StartTime))%BufferLength;
+
+//	if (PlayPos>=LastPlayPos) {
+//		BytesAhead+=LastPlayPos-PlayPos;	
+//	} else {
+//		BytesAhead+=BufferLength-LastPlayPos+PlayPos;
+//	}
+
+	BytesAhead-=(DWORD )(88*(GetTickCount()-LastTime));
+	LastTime=GetTickCount();
+	LastPlayPos=PlayPos;
+
+	while (BytesAhead>(BufferLength/2)) {
+		Sleep(3);
+		if (Playing==0) {
+			return(-1);
+		}
+	//	dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+		BytesAhead-=(DWORD )(88*(GetTickCount()-LastTime));
+		LastTime=GetTickCount();
+	}
+
+//	while (PlayPos<BL) {
+//		   Sleep(1);
+//		   dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+//	}
+//	while (MyWritePos+BL>PlayPos) {
+//			Sleep(1);
+//			dsRV=lpDSB->GetCurrentPosition(&PlayPos,&WritePos);
+//	}
+
+dsRV=lpDSB->Lock(MyWritePos,BL,&pbData,&dwLength,&pbData2,&dwLength2,0L);
+
+LastPos[j++].Data=pbData;
+
+if (dsRV==DS_OK) {
+	memcpy(pbData,data,dwLength);
+
+	if (dwLength2) {
+		memcpy(pbData2,data+dwLength,dwLength2);
+	}
+
+	MyWritePos+=dwLength+dwLength2;
+	BytesAhead+=dwLength+dwLength2;
+	if (MyWritePos>BufferLength) {
+		MyWritePos-=BufferLength;
+	}
+
+} else {
+	return (-1);
+}
+
+dsRV=lpDSB->Unlock(pbData,dwLength,pbData2,dwLength2);
+
+
+
+// TODO Data is supposed to be written to device here..
+
+      
+//      if ((l=write(dspfd,data,BL))<0)  {      
+//		 perror("Could not write to /dev/dsp!");  
+//      }
+//   fprintf(stderr,"Write %d,of %d\n",l,BL);   
+   
+//      if (l<BL) {
+//	 fprintf(stderr,"Underflow at write %d,of %d\n",l,BL);
+//      }
+      
+return(1);
+}
+
+/*
+ *  voice_on  NOGUS version. Starts a voice!!
+ * 
+ * 
+ */
+int voice_on(int i) {
+   int j=0;
+   short Test;
+   assert(i<MAX_DRUMS);
+   assert(i>0);
+
+
+   while ((Voice[j].count>-1)&&(j<MAX_VOICE))  {
+      j++;
+   }
+	  
+   if (j==MAX_VOICE)  {
+	   return(-1);
+//      fprintf(stderr,"Underflow of voices\n");
+   }
+	
+   Voice[j].on=i;  
+   Voice[j].pointer=Drum[i].sample;
+
+   if (Drum[i].Loaded==1) {      
+      Voice[j].count=0;
+   } else {
+	  Voice[j].count=-1;
+   }
+   Test=*Voice[j].pointer;
+   
+   Voice[j].length=Drum[i].length;
+return(1);
+}
+
+//
+// add_one_beat
+//
+/* This will add one/4 beat to the sample to be played */
+/* Fo the NOGUS version                                */
+
+int add_one_beat(int LENGTH)  {
+   int j,voi,Soundlength;
+   int CrossedLimit=0;
+
+   memset( &tmpstore,0,LENGTH*sizeof(long));
+
+   
+   for (voi=0;voi<MAX_VOICE;voi++)  {
+      if (Voice[voi].count>-1)  {
+		Soundlength=MIN(LENGTH,Voice[voi].length-Voice[voi].count);
+
+	if (Soundlength==0)  {
+	    Voice[voi].count=-1;  
+	 } else {
+	    for(j=0;j<=Soundlength;j++) {
+	       tmpstore[j]+=*Voice[voi].pointer;
+	       Voice[voi].pointer++;
+	    }
+	 }
+
+	Voice[voi].pointer--; 
+	 
+	 if (Soundlength==LENGTH)  {
+	    Voice[voi].count+=Soundlength;
+	 } else  {
+//	    fprintf(stderr,"[%d]",*(Voice[voi].pointer--));
+	    Voice[voi].count=-1;  
+	 }
+      }	    
+   }
+   
+   for(j=0;j<=LENGTH;j++) {
+      
+      /* TODO, Hey.. Do this better as well */
+     
+	 data[BlockCounter]=MIN(tmpstore[j],0x7FFF);
+	 
+     if (tmpstore[j]<-32767)  {
+		data[BlockCounter]=-32767;
+	 } 
+
+	 LeftOfBlock-=2;
+     BlockCounter+=1;      
+
+      if (LeftOfBlock<1)  {
+	 CrossedLimit=1;
+ 	 while (WRITE(1)<0) {
+		 static int Bail=0;
+		 Bail++;
+		 if (Playing==0) { return (-1); };
+		 Sleep (1);
+		 if (Bail>100) {
+			 Bail=0;
+			 break;
+		 }
+	 };
+	 WRITE(1);
+ 	 WRITE(1);
+
+	 
+	 LeftOfBlock=BL;
+	 BlockCounter=0;
+      }
+   
+   }
+
+return (CrossedLimit);
+}
+//
+// PlayPattern
+//
+//
+/* Play pattern for no GUS soundcards */
+void  PlayPattern(int Patt,int Measure)
+{
+
+   double DBPM=(double) BPM;
+   int j,i=0;
+   int samplelen;
+   int CrossedLimit,NextPatt;
+   static int RememberPatt;   
+
+//   if (Beat>0)  {
+//      NextPatt=Patt;
+//     Patt=RememberPatt;
+//   }
+	 
+   samplelen=660000/BPM;                       /* Length of 1/4 beat */
+   
+   for (i=Beat;i<16;i++) {
+      for (j=0;j<L_MAX_DRUMS;j++) { 
+	 	 if (Pattern[Patt].DrumPattern[j].Drum!=NULL) {
+		    if (Pattern[Patt].DrumPattern[j].beat[i]>0)  {
+			   voice_on(Pattern[Patt].DrumPattern[j].Drum->SampleNum);
+			}
+		}
+	}
+      
+    Beat++;
+    CrossedLimit=add_one_beat(samplelen+1);
+      if (CrossedLimit==1)  {
+		break;
+      }	 
+   }
+   if (Beat>15)  {
+      Beat=0;
+//      
+//      Patt=NextPatt;
+   }
+   
+   RememberPatt=Patt; 
+}
+

@@ -1,0 +1,330 @@
+// Microsoft Visual C++ generated resource script.
+//
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "afxres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// Swedish (Sweden) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_SVE)
+LANGUAGE LANG_SWEDISH, SUBLANG_SWEDISH
+#pragma code_page(1252)
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+
+1 TEXTINCLUDE 
+BEGIN
+    "resource.h\0"
+END
+
+2 TEXTINCLUDE 
+BEGIN
+    "#include ""afxres.h""\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE 
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+WMENU MENU
+BEGIN
+    POPUP "Files"
+    BEGIN
+        MENUITEM "Load",                        ID_FILES_LOAD
+        MENUITEM "Save",                        ID_FILES_SAVE
+        MENUITEM SEPARATOR
+        MENUITEM "Delay",                       ID_FILES_DELAY
+        MENUITEM "Mixer",                       ID_FILES_MIXER
+        MENUITEM SEPARATOR
+        MENUITEM "Generate 3MU Sound",          ID_FILES_GENERATETB303SOUND
+        MENUITEM SEPARATOR
+        MENUITEM "Quit",                        ID_FILES_QUIT
+    END
+    POPUP "Drums1"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "Drums2"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "Drums3"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "Drums4"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "Drums5"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "Drums6"
+    BEGIN
+        MENUITEM SEPARATOR
+    END
+    POPUP "BPM"
+    BEGIN
+        MENUITEM "90",                          ID_BPM_90
+        MENUITEM "100",                         ID_BPM_100
+        MENUITEM "110",                         ID_BPM_110
+        MENUITEM "120",                         ID_BPM_120
+        MENUITEM "130",                         ID_BPM_130
+        MENUITEM "140",                         ID_BPM_140
+        MENUITEM "150",                         ID_BPM_150
+        MENUITEM "160",                         ID_BPM_160
+        MENUITEM "180",                         ID_BPM_180
+    END
+    POPUP "Help", HELP
+    BEGIN
+        MENUITEM "About",                       ID_HELP_ABOUT
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+ON                      BITMAP                  "bitmap1.bmp"
+
+OFF                     BITMAP                  "bitmap3.bmp"
+
+PLAY                    BITMAP                  "off1.bmp"
+
+STOP                    BITMAP                  "play1.bmp"
+
+EYE                     BITMAP                  "bmp00001.bmp"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+MYDBTEST DIALOG 0, 0, 212, 95
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CONTROL | WS_CAPTION | WS_SYSMENU
+CAPTION "Delay"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,155,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,155,24,50,14
+    CONTROL         "Slider1",IDC_SLIDER1,"msctls_trackbar32",TBS_AUTOTICKS | TBS_BOTH | WS_TABSTOP,27,20,80,19
+    CONTROL         "Slider2",IDC_SLIDER2,"msctls_trackbar32",TBS_AUTOTICKS | TBS_BOTH | WS_TABSTOP,7,55,198,23
+    CONTROL         "ON",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,7,7,27,10
+END
+
+MYDB DIALOG 0, 0, 402, 167
+STYLE DS_SETFONT | DS_MODALFRAME | WS_CAPTION
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,335,7,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,335,28,50,14
+    LTEXT           "PAN",IDC_STATIC,111,7,28,11
+    LTEXT           "VOL",IDC_STATIC,230,7,44,12
+END
+
+ABOUT_D DIALOGEX 0, 0, 389, 194
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Dialog"
+FONT 8, "MS Sans Serif", 0, 0, 0x0
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,332,7,50,14
+    LTEXT           " \n \tCopyright © 1995, 1996,  by Jarno Seppänen <jarno.seppanen@cc.tut.fi>\n  \tFiles eg.c, seq.c, vcf.c and vco.c are based on a routine\n  \tby Lars Hamre <lars@scala.no>.",IDC_STATIC,7,137,266,42
+    LTEXT           "Copyright © 2022,  by Olof Åstrand <olof.astrand@gmail.com> Part of code is based on 3mu which is:",IDC_STATIC,35,121,182,18
+    LTEXT           "Keys a-z selects apattern and shift A-Z overwrites a pattern with the current. When generating a 3MU sequence it is recomended that VCF-Amount is turned down. The sequence will overwrite the first DRUM. It will also apear last, after the drums selected..",IDC_STATIC,22,60,202,54
+    ICON            "WINDICON",IDC_STATIC,25,7,20,20
+    LTEXT           "WINDRUM 0.3",IDC_STATIC,23,42,134,15
+    LTEXT           "Static",IDC_STATIC,24,102,181,15
+    LTEXT           "By using the first drum, one can use testSequnce button when generating 3MU sequnces. If the player isn't started and no beats from the first drum are selected., then you will not hear anything.",IDC_STATIC,233,63,130,49
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    "MYDBTEST", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 205
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 88
+    END
+
+    "MYDB", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 392
+        TOPMARGIN, 7
+    END
+
+    "ABOUT_D", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 382
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 187
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+IDI_ICON1               ICON                    "icon1.ico"
+
+WINDICON                ICON                    "icon2.ico"
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// AFX_DIALOG_LAYOUT
+//
+
+ABOUT_D AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+#endif    // Swedish (Sweden) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////
+// English (United Kingdom) resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENG)
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_UK
+#pragma code_page(1252)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+MY3MU DIALOG 0, 0, 517, 314
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Dialog"
+FONT 8, "MS Sans Serif"
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,460,7,50,14
+    GROUPBOX        "VCO",IDC_STATIC,5,5,130,135
+    GROUPBOX        "EG",IDC_STATIC,150,5,164,135
+    CONTROL         "Slider1",IDC_VCO_PULSEWIDTH,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | TBS_BOTH | WS_TABSTOP,15,31,30,65
+    CTEXT           "Pulse Width",IDC_STATIC,15,20,50,10
+    CONTROL         "Square Wave",IDC_VCO_SQUARE,"Button",BS_AUTORADIOBUTTON,55,40,55,15
+    CONTROL         "Triangular",IDC_VCO_TRIANG,"Button",BS_AUTORADIOBUTTON,55,55,55,15
+    CONTROL         "",IDC_VCO_FILE,"Button",BS_AUTORADIOBUTTON | WS_DISABLED,55,74,15,15
+    EDITTEXT        IDC_EDIT1,70,74,60,15,ES_AUTOHSCROLL | WS_DISABLED
+    CONTROL         "Slider2",IDC_VCO_DETUNE,"msctls_trackbar32",TBS_TOP | TBS_NOTICKS | WS_TABSTOP,17,107,92,11
+    LTEXT           "FineTune",IDC_STATIC,45,97,60,10
+    CONTROL         "Slider3",IDC_EG_A,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | TBS_BOTH | WS_TABSTOP,155,19,25,55
+    CONTROL         "Slider3",IDC_EG_S,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | TBS_BOTH | WS_TABSTOP,215,19,25,55
+    CONTROL         "Slider3",IDC_EG_D,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | TBS_BOTH | WS_TABSTOP,185,19,25,55
+    CONTROL         "Slider3",IDC_EG_R,"msctls_trackbar32",TBS_AUTOTICKS | TBS_VERT | TBS_BOTH | WS_TABSTOP,243,19,25,55
+    CONTROL         "Slider3",ID_EG_VCF_MOD,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,158,74,108,14
+    CTEXT           "VCF Mod",IDC_STATIC,269,74,44,15
+    CONTROL         "Slider4",ID_EG_VCO_MOD,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,158,91,108,17
+    CTEXT           "VCO Mod",IDC_STATIC,269,94,44,15
+    CONTROL         "Slider5",ID_EG_VCA_MOD,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,158,110,108,17
+    CTEXT           "VCA Mod",IDC_STATIC,267,112,44,15
+    GROUPBOX        "VCF",IDC_STATIC,325,7,122,131
+    CONTROL         "Slider6",IDC_VCF_CUTOFF,"msctls_trackbar32",TBS_VERT | WS_TABSTOP,333,30,24,101
+    LTEXT           "Cutoff",IDC_STATIC,333,20,21,8
+    CONTROL         "Slider7",IDC_VCF_RESONANCE,"msctls_trackbar32",TBS_VERT | WS_TABSTOP,356,30,22,101
+    LTEXT           "Resonance",IDC_STATIC,355,20,42,8
+    LTEXT           "Cutoff fact",IDC_STATIC,393,39,42,11
+    DEFPUSHBUTTON   "Generate",IDCANCEL,460,127,50,14
+    CONTROL         "Slider1",IDC_VCF_CUTOFFFACT,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,382,53,59,12
+    CONTROL         "Slider3",IDC_EG_ADSRFACT,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,174,126,99,12
+    CTEXT           "Reso fact",IDC_STATIC,395,74,38,14
+    CONTROL         "Slider4",IDC_VCF_RESOFACT,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,385,85,55,12
+    LTEXT           "Gain",IDC_STATIC,43,118,48,8
+    CONTROL         "Slider5",IDC_VCO_GAIN,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,21,128,78,9
+    LTEXT           "VCF AMount",IDC_STATIC1,399,101,35,16
+    CONTROL         "Slider6",IDC_VCF_AMOUNT,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,387,120,53,12
+    EDITTEXT        IDC_EDIT2,95,16,31,16,ES_AUTOHSCROLL
+    CTEXT           "Oct:",IDC_STATIC,67,19,22,13
+    PUSHBUTTON      "Test Seq",IDC_BUTTON1,461,92,50,14
+    CONTROL         "Check1",IDC_CHECK1,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,43,279,10,13
+    CONTROL         "Check1",IDC_CHECK2,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,79,279,10,13
+    CONTROL         "Check1",IDC_CHECK3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,107,279,10,13
+    CONTROL         "Check1",IDC_CHECK4,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,136,279,10,13
+    CONTROL         "Check1",IDC_CHECK5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,170,279,10,13
+    CONTROL         "Check1",IDC_CHECK6,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,200,279,10,13
+    CONTROL         "Check1",IDC_CHECK7,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,227,279,10,13
+    CONTROL         "Check1",IDC_CHECK8,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,261,279,10,13
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    "MY3MU", DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 510
+        VERTGUIDE, 298
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 307
+        HORZGUIDE, 74
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+#endif    // English (United Kingdom) resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE 3 resource.
+//
+
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED
+

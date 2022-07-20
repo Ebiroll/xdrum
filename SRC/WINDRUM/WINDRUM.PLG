@@ -1,0 +1,78 @@
+<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: windrum - Win32 Debug--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating command line "rc.exe /l 0x41d /fo"Debug/Wdrum.res" /i "\Olof\newWindrum\SRC" /d "_DEBUG" "C:\Olof\newWindrum\SRC\Wdrum.rc"" 
+Creating temporary file "C:\WINDOWS\TEMP\RSP4142.TMP" with contents
+[
+/nologo /MLd /W3 /Gm /GX /ZI /Od /D "WIN32" /D "_DEBUG" /D "_WINDOWS" /FR"Debug/" /Fp"Debug/windrum.pch" /YX /Fo"Debug/" /Fd"Debug/" /FD /c 
+"C:\Olof\newWindrum\SRC\Gui.cpp"
+"C:\Olof\newWindrum\SRC\My3mu.cpp"
+"C:\Olof\newWindrum\SRC\Object.cpp"
+"C:\Olof\newWindrum\SRC\tb303.cpp"
+"C:\Olof\newWindrum\SRC\wav.cpp"
+"C:\Olof\newWindrum\SRC\WavPlayer.cpp"
+"C:\Olof\newWindrum\SRC\Wndprog.cpp"
+]
+Creating command line "cl.exe @C:\WINDOWS\TEMP\RSP4142.TMP" 
+Creating temporary file "C:\WINDOWS\TEMP\RSP4143.TMP" with contents
+[
+winmm.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib dsound.lib comctl32.lib /nologo /subsystem:windows /incremental:yes /pdb:"Debug/windrum.pdb" /debug /machine:I386 /out:"Debug/windrum.exe" /pdbtype:sept 
+.\Debug\Gui.obj
+.\Debug\My3mu.obj
+.\Debug\Object.obj
+.\Debug\tb303.obj
+.\Debug\wav.obj
+.\Debug\WavPlayer.obj
+.\Debug\Wndprog.obj
+.\Debug\Wdrum.res
+]
+Creating command line "link.exe @C:\WINDOWS\TEMP\RSP4143.TMP"
+<h3>Output Window</h3>
+Compiling resources...
+Compiling...
+Gui.cpp
+c:\olof\newwindrum\src\gui.cpp(617) : warning C4244: '=' : conversion from 'double' to 'float', possible loss of data
+c:\olof\newwindrum\src\gui.cpp(618) : warning C4244: '=' : conversion from 'double' to 'float', possible loss of data
+My3mu.cpp
+c:\olof\newwindrum\src\gui.cpp(97) : warning C4700: local variable 'hBr' used without having been initialized
+c:\olof\newwindrum\src\my3mu.cpp(159) : warning C4101: 's' : unreferenced local variable
+c:\olof\newwindrum\src\my3mu.cpp(195) : warning C4101: 'IL' : unreferenced local variable
+c:\olof\newwindrum\src\my3mu.cpp(547) : warning C4244: '=' : conversion from 'const double' to 'int', possible loss of data
+Object.cpp
+tb303.cpp
+wav.cpp
+WavPlayer.cpp
+c:\olof\newwindrum\src\wavplayer.cpp(237) : warning C4101: 'dwCallbackInstance' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(660) : warning C4101: 'LengthOfWrite' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(647) : warning C4101: 'dsRV' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(643) : warning C4101: 'dwLength' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(665) : warning C4101: 'len' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(644) : warning C4101: 'dwLength2' : unreferenced local variable
+c:\olof\newwindrum\src\wavplayer.cpp(753) : warning C4244: '=' : conversion from 'double' to 'float', possible loss of data
+c:\olof\newwindrum\src\wavplayer.cpp(754) : warning C4244: '=' : conversion from 'double' to 'float', possible loss of data
+c:\olof\newwindrum\src\wavplayer.cpp(915) : warning C4244: '=' : conversion from 'long' to 'short', possible loss of data
+c:\olof\newwindrum\src\wavplayer.cpp(926) : warning C4244: '=' : conversion from 'long' to 'short', possible loss of data
+Wndprog.cpp
+c:\olof\newwindrum\src\wavplayer.cpp(683) : warning C4700: local variable 'PlayPos' used without having been initialized
+c:\olof\newwindrum\src\wavplayer.cpp(687) : warning C4700: local variable 'WritePos' used without having been initialized
+c:\olof\newwindrum\src\wndprog.cpp(146) : warning C4101: 'myPS' : unreferenced local variable
+c:\olof\newwindrum\src\wndprog.cpp(421) : warning C4101: 'data' : unreferenced local variable
+c:\olof\newwindrum\src\wndprog.cpp(499) : warning C4101: 'i' : unreferenced local variable
+c:\olof\newwindrum\src\wndprog.cpp(527) : warning C4101: 'i' : unreferenced local variable
+Linking...
+Creating command line "bscmake.exe /nologo /o"Debug/windrum.bsc"  .\Debug\Gui.sbr .\Debug\My3mu.sbr .\Debug\Object.sbr .\Debug\tb303.sbr .\Debug\wav.sbr .\Debug\WavPlayer.sbr .\Debug\Wndprog.sbr"
+Creating browse info file...
+<h3>Output Window</h3>
+
+
+
+<h3>Results</h3>
+windrum.exe - 0 error(s), 22 warning(s)
+</pre>
+</body>
+</html>
