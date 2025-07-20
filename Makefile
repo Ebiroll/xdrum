@@ -31,6 +31,11 @@ stereo:
 	gcc -c $(F) -DNOGUS -DSTEREO sbdrum.c -o  sbdrum.o 
 	@make xdrum	
 
+alsa:
+	gcc -c $(F) -DALSADRUM -DSTEREO alsadrum.c -o  alsadrum.o 
+	@make modern
+
+
 files.o:  files.c drum.h
 	gcc -c $(F) -o files.o files.c
 
@@ -46,6 +51,9 @@ sbdrum.o: gdrum.h sbdrum.c drum.h
 
 xdrum: sbdrum.o xdrum.o widget.o files.o  
 	gcc -L$(LIBR) xdrum.o widget.o sbdrum.o files.o -lXaw -lXmu -lXt -lX11  -o xdrum
+
+modern: alsadrum.o xdrum.o widget.o files.o  
+	gcc -L$(LIBR) xdrum.o widget.o alsadrum.o files.o -lXaw -lXmu -lXt -lX11 -lasound  -o xdrum
 
 clean:
 	rm -f  xdrum  *.o

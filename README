@@ -60,7 +60,10 @@ Revision history,
 HOW TO Compile
 =============
 
-(1) make  [gus|other|stereo]
+(1) make  [gus|other|stereo|alsa]
+
+sudo apt install libasound2-dev
+
 
 This will work fine in most cases. Otherwise you must modify something.
 Most probably the makefile.
