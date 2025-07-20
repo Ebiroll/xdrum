@@ -22,7 +22,7 @@ extern int _seqbufptr;
 extern void seqbuf_dump(void);
 extern int seqfd, dev;
 
-extern int load_sample (int samplenum,char *name,int pan,int Intel);
+extern int load_sample (int samplenum,const char *name,int pan,int Intel);
 
 
 #define CMD_ARPEG		0x00

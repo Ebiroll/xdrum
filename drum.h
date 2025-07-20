@@ -62,6 +62,6 @@ extern void PlayPattern(int Patt,int Measure);
 extern unsigned long GetUpdateIntervall(int PattI);
 extern int StopPlaying(void);
 extern int EmptyCard(void);
-extern int load_sample (int samplenum,char *name,int pan,int Intel);
+extern int load_sample (int samplenum,const char *name,int pan,int Intel);
 #endif
 

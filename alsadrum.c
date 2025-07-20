@@ -23,8 +23,8 @@
 #define BUFFER_SIZE     16384
 #define MAX_DELAY       200000
 #define SLEN            265535
-#define MAX_DRUMS       64
-#define MAX_PATTERNS    32
+//#define MAX_DRUMS       64
+//#define MAX_PATTERNS    32
 
 #ifndef DRUMS_ROOT_DIR
 #define DRUMS_ROOT_DIR  "."
@@ -79,7 +79,7 @@ extern int M;
 
 /* Function prototypes */
 static int open_alsa_device(void);
-static void close_alsa_device(void);
+ void close_alsa_device(void);
 int load_sample(int samplenum, const char *name, int pan, int intel_format);
 static void play_drum(int sample);
 static void parse_drums(const char *filename);
@@ -205,7 +205,7 @@ static int open_alsa_device(void)
 }
 
 /* Close ALSA device */
-static void close_alsa_device(void)
+void close_alsa_device(void)
 {
     if (pcm_handle) {
         snd_pcm_drain(pcm_handle);
@@ -603,13 +603,24 @@ unsigned long GetUpdateIntervall(int PattI)  {
 }
 
 
+// Implementation:
+int init_audio_system(void) 
+{
+    if (pcm_handle != NULL) {
+        return 0; // Already initialized
+    }
+    return open_alsa_device();
+}
+
 /* Main entry point */
 int MAIN(int argc, char *argv[])
 {
     /* Initialize ALSA */
-    if (open_alsa_device() < 0) {
-        fprintf(stderr, "Failed to initialize ALSA\n");
-        return 1;
+
+       // Initialize audio system
+    if (init_audio_system() < 0) {
+        fprintf(stderr, "Warning: Failed to initialize audio system\n");
+        // You might want to continue without audio or exit
     }
 
     /* Initialize delay effect */
@@ -636,15 +647,16 @@ int MAIN(int argc, char *argv[])
      */
 
     /* Example: Play pattern 0 for 4 measures */
-    for (int measure = 0; measure < 4; measure++) {
-        play_pattern(0, measure);
-    }
+    //for (int measure = 0; measure < 4; measure++) {
+    //    play_pattern(0, measure);
+    //}
 
     /* Stop and cleanup */
     stop_playing();
-    close_alsa_device();
+    // close_alsa_device();
 
     /* Free allocated memory */
+    #if 0
     for (int i = 0; i < MAX_DRUMS; i++) {
         if (Drum[i].sample) {
             free(Drum[i].sample);
@@ -656,6 +668,7 @@ int MAIN(int argc, char *argv[])
             free(Drum[i].Filename);
         }
     }
+    #endif
 
     return 0;
 }

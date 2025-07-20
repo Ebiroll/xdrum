@@ -41,7 +41,7 @@
 
 #include <assert.h>
 
-extern tDelay Delay;
+extern tDelay delay;
 
 
 /* Global variables */
@@ -288,25 +288,51 @@ void SetBeats(int DrumNr) {
 
 void ChangeDrum(Widget w, XtPointer client_data, XtPointer call_data)
 {
-   int DrumNr=(int)client_data;
 
-   
-   if (Pattern[PatternIndex].DrumPattern[DrumNr].Drum->Loaded!=1)  {
-      debug("Load sample num %d\n",DrumNr);
-      load_sample(
-		  Pattern[PatternIndex].DrumPattern[DrumNr].Drum->SampleNum,
-		  Pattern[PatternIndex].DrumPattern[DrumNr].Drum->Filename,
-		  Pattern[PatternIndex].DrumPattern[DrumNr].Drum->pan,
-		  Pattern[PatternIndex].DrumPattern[DrumNr].Drum->Filetype);
-		  
-      Pattern[PatternIndex].DrumPattern[DrumNr].Drum->Loaded=1;
-   }
-   
-   DrumIndex=DrumNr;
-   PattP=&Pattern[PatternIndex].DrumPattern[DrumNr];
-   assert(PattP!=NULL);
-   SetBeats(DrumNr);
-   
+    printf("Change drum to %d\n", (int)client_data);
+    int DrumNr = (int)client_data;
+    
+    // Bounds checking
+    if (DrumNr < 0 || DrumNr >= MAX_DRUMS) {
+        fprintf(stderr, "Error: DrumNr %d out of bounds\n", DrumNr);
+        return;
+    }
+    
+    if (PatternIndex < 0 || PatternIndex >= MAX_PATTERNS) {
+        fprintf(stderr, "Error: PatternIndex %d out of bounds\n", PatternIndex);
+        return;
+    }
+    
+    // Check if drum pointer is valid
+    if (Pattern[PatternIndex].DrumPattern[DrumNr].Drum == NULL) {
+        fprintf(stderr, "Error: Drum %d not initialized in pattern %d\n", DrumNr, PatternIndex);
+        return;
+    }
+    
+    // Now safe to access the drum
+    tDrum *drum = Pattern[PatternIndex].DrumPattern[DrumNr].Drum;
+    
+    if (drum->Loaded != 1) {
+        debug("Load sample num %d\n", DrumNr);
+        
+        // Check if filename exists
+        if (drum->Filename == NULL) {
+            fprintf(stderr, "Error: No filename for drum %d\n", DrumNr);
+            return;
+        }
+        
+        if (load_sample(drum->SampleNum, drum->Filename, drum->pan, drum->Filetype) < 0) {
+            fprintf(stderr, "Error: Failed to load sample for drum %d\n", DrumNr);
+            return;
+        }
+        
+        drum->Loaded = 1;
+    }
+    
+    DrumIndex = DrumNr;
+    PattP = &Pattern[PatternIndex].DrumPattern[DrumNr];
+    assert(PattP != NULL);
+    SetBeats(DrumNr);   
 }
 
 
@@ -335,6 +361,7 @@ void quit_application()
    XtReleaseGC(top_level, g_ctx.line_GC);
    XtReleaseGC(top_level, g_ctx.delete_line_GC);
    XtDestroyWidget(top_level);
+   close_alsa_device();
    exit(0);
 }
 
@@ -1263,8 +1290,8 @@ void popup_pattern(Widget w)
 void set_feedback(Widget w, XtPointer client_data, XtPointer percent_ptr)
 {
 
-  Delay.leftc=*(float *)percent_ptr;
-  /* fprintf(stderr,"F %f",Delay.leftc);
+  delay.leftc=*(float *)percent_ptr;
+  /* fprintf(stderr,"F %f",delay.leftc);
    */
 }
 /*
@@ -1277,7 +1304,7 @@ void set_feedback(Widget w, XtPointer client_data, XtPointer percent_ptr)
 void set_time(Widget w, XtPointer client_data, XtPointer percent_ptr)
 {
 
-  Delay.Delay16thBeats=16*16* *(float *)percent_ptr;
+  delay.Delay16thBeats=16*16* *(float *)percent_ptr;
   /*  fprintf(stderr,"T %u",Delay.Delay16thBeats);
    */
 }
@@ -1291,10 +1318,10 @@ void set_time(Widget w, XtPointer client_data, XtPointer percent_ptr)
 
 void delay_on(Widget w, XtPointer client_data, XtPointer percent_ptr)
 {
-  if (Delay.On==1) {
-   Delay.On=0;
+  if (delay.On==1) {
+   delay.On=0;
   } else {
-   Delay.On=1;
+   delay.On=1;
   }
 
 }
@@ -1324,7 +1351,7 @@ void popup_delay_dialog (Widget w, String str )
 
    tempw=MW("Delay Label",toggleWidgetClass,delay_dialog,
 	    XtNwidth, 40,
-	    XtNstate,Delay.On,
+	    XtNstate,delay.On,
 	    XtNlabel,"ON", NULL);
 
    XtAddCallback (tempw, XtNcallback,delay_on,
