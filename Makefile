@@ -3,6 +3,7 @@ all:
 	@echo GUS version: make gus
 	@echo generic /dev/dsp version: make other	
 	@echo stereo /dev/dsp version: make stereo
+	@echo alsa  stereo alsa version: make alsa
 
 REV=R1_5
 
@@ -32,7 +33,7 @@ stereo:
 	@make xdrum	
 
 alsa:
-	gcc -c $(F) -DALSADRUM -DSTEREO alsadrum.c -o  alsadrum.o 
+	gcc -c $(F) -DALSADRUM -DSTEREO -g alsadrum.c -o  alsadrum.o 
 	@make modern
 
 
@@ -40,7 +41,7 @@ files.o:  files.c drum.h
 	gcc -c $(F) -o files.o files.c
 
 xdrum.o: xdrum.c drum.h
-	gcc -c $(F) -o xdrum.o -I$(INCL) xdrum.c
+	gcc -c $(F) -g -o xdrum.o -I$(INCL) xdrum.c
 
 widget.o: widget.c drum.h
 	gcc -c $(F) -o widget.o -I$(INCL) widget.c
@@ -53,7 +54,7 @@ xdrum: sbdrum.o xdrum.o widget.o files.o
 	gcc -L$(LIBR) xdrum.o widget.o sbdrum.o files.o -lXaw -lXmu -lXt -lX11  -o xdrum
 
 modern: alsadrum.o xdrum.o widget.o files.o  
-	gcc -L$(LIBR) xdrum.o widget.o alsadrum.o files.o -lXaw -lXmu -lXt -lX11 -lasound  -o xdrum
+	gcc -L$(LIBR) -g xdrum.o widget.o alsadrum.o files.o -lXaw -lXmu -lXt -lX11 -lasound  -o xdrum
 
 clean:
 	rm -f  xdrum  *.o

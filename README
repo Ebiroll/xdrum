@@ -177,6 +177,22 @@ Arne Di Russo (for the xdrum homepage)
 Matija Nalis (for the DRUMS_ROOT patch)
 
 
+WSL
+===
+
+sudo apt install --reinstall libasound2-plugins
+
+
+create  /etc/asound.conf
+pcm.!default {
+  type pulse
+  server "/mnt/wslg/PulseServer"
+}
+
+ctl.!default {
+  type pulse
+  server "/mnt/wslg/PulseServer"
+}
 
 
 
