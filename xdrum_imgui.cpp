@@ -12,6 +12,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
+#include <cmath>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -76,6 +77,12 @@ int visible_sample;
 DWORD start_visible;
 int pid = -1;
 
+/* Context menu state */
+bool show_drum_context_menu = false;
+int context_menu_drum_idx = -1;
+bool show_waveform_window = false;
+int waveform_drum_idx = -1;
+
 /* Timer management for ImGui */
 std::chrono::steady_clock::time_point last_update_time;
 std::chrono::steady_clock::time_point song_update_time;
@@ -87,11 +94,13 @@ void RenderMainWindow();
 void RenderFileDialog();
 void RenderPatternDialog();
 void RenderDelayDialog();
+void RenderDrumContextMenu();
+void RenderWaveformWindow();
 void UpdateTimers();
+void HandleKeyboardInput();
 void set_active_pattern(Widget w, XtPointer client_data, XtPointer call_data);
 void PlayMeasure(XtPointer client_data, XtIntervalId *Dummy);
 void UpdateSong(XtPointer client_data, XtIntervalId *Dummy);
-
 
 int main(int argc, char **argv)
 {
@@ -105,7 +114,7 @@ int main(int argc, char **argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
     /* Create window */
-    window = glfwCreateWindow(800, 600, "XDrum/V1.5 - ImGui Port", NULL, NULL);
+    window = glfwCreateWindow(900, 700, "XDrum/V1.5 - ImGui Port", NULL, NULL);
     if (window == NULL)
         return -1;
 
@@ -116,6 +125,7 @@ int main(int argc, char **argv)
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable keyboard navigation
 
     ImGui::StyleColorsDark();
 
@@ -140,6 +150,9 @@ int main(int argc, char **argv)
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
+        /* Handle keyboard input */
+        HandleKeyboardInput();
+
         /* Update timers for pattern/song playback */
         UpdateTimers();
 
@@ -154,6 +167,12 @@ int main(int argc, char **argv)
             
         if (show_delay_dialog)
             RenderDelayDialog();
+            
+        if (show_drum_context_menu)
+            RenderDrumContextMenu();
+            
+        if (show_waveform_window)
+            RenderWaveformWindow();
 
         /* Rendering */
         ImGui::Render();
@@ -177,6 +196,43 @@ int main(int argc, char **argv)
 
     close_alsa_device();
     return 0;
+}
+
+void HandleKeyboardInput()
+{
+    ImGuiIO& io = ImGui::GetIO();
+    
+    // Only process keys when no text input is active and main window is focused
+    if (!io.WantCaptureKeyboard || ImGui::IsAnyItemActive()) {
+        return;
+    }
+    
+    // Check for pattern switching keys (A-Z)
+    for (int i = 0; i < 26; i++) {
+        ImGuiKey key = (ImGuiKey)(ImGuiKey_A + i);
+        if (ImGui::IsKeyPressed(key)) {
+            char pattern_char;
+            
+            if (io.KeyShift) {
+                // Shift+letter = uppercase pattern
+                pattern_char = 'A' + i;
+                // Copy current pattern to new pattern
+                CopyBeat(PatternIndex, pattern_char);
+            } else {
+                // letter = lowercase pattern
+                pattern_char = 'a' + i;
+            }
+            
+            // Switch to the pattern
+            PatternIndex = pattern_char;
+            PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
+            SetBeats(DrumIndex);
+            sprintf(PatternBuf, "%c", pattern_char);
+            
+            printf("Switched to pattern %c\n", pattern_char);
+            break;
+        }
+    }
 }
 
 void RenderMainWindow()
@@ -226,7 +282,7 @@ void RenderMainWindow()
         
         any_drum_shown = true;
         
-        // Drum name button
+        // Drum name button with right-click context menu
         bool is_selected = (drum_idx == DrumIndex);
         if (is_selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
@@ -234,6 +290,13 @@ void RenderMainWindow()
         
         if (ImGui::Button(drum_name, ImVec2(80, 0))) {
             ChangeDrum(nullptr, (XtPointer)(intptr_t)drum_idx, nullptr);
+        }
+        
+        // Right-click context menu
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            context_menu_drum_idx = drum_idx;
+            show_drum_context_menu = true;
+            ImGui::OpenPopup("DrumContextMenu");
         }
         
         if (is_selected) {
@@ -319,6 +382,13 @@ void RenderMainWindow()
             ChangeDrum(nullptr, (XtPointer)(intptr_t)i, nullptr);
         }
         
+        // Right-click context menu
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+            context_menu_drum_idx = i;
+            show_drum_context_menu = true;
+            ImGui::OpenPopup("DrumContextMenu");
+        }
+        
         drums_per_row++;
     }
 
@@ -374,26 +444,101 @@ void RenderMainWindow()
                               ImVec2(-1, 100), 
                               is_song_playing ? ImGuiInputTextFlags_ReadOnly : 0);
 
-    /* Keyboard input handling for pattern switching */
-    if (ImGui::IsWindowFocused() && !ImGui::IsAnyItemActive()) {
-        ImGuiIO& io = ImGui::GetIO();
-        for (int key = ImGuiKey_A; key <= ImGuiKey_Z; key++) {
-            if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(key))) {
-                int keycode = key - ImGuiKey_A + 'a';
+    ImGui::End();
+}
+
+void RenderDrumContextMenu()
+{
+    if (ImGui::BeginPopup("DrumContextMenu")) {
+        if (context_menu_drum_idx >= 0 && context_menu_drum_idx < MAX_DRUMS) {
+            tDrum* drum = Pattern[PatternIndex].DrumPattern[context_menu_drum_idx].Drum;
+            
+            if (drum != NULL) {
+                ImGui::Text("Drum: %s", drum->Name ? drum->Name : "Unknown");
+                ImGui::Separator();
                 
-                if (io.KeyShift) {
-                    /* Copy current pattern to new pattern */
-                    CopyBeat(PatternIndex, keycode);
+                // Pan control
+                ImGui::Text("Pan:");
+                float pan = (float)drum->pan / 127.0f * 2.0f - 1.0f; // Convert 0-127 to -1.0 to 1.0
+                if (ImGui::SliderFloat("##pan", &pan, -1.0f, 1.0f, "%.2f")) {
+                    drum->pan = (int)((pan + 1.0f) / 2.0f * 127.0f); // Convert back to 0-127
                 }
                 
-                PatternIndex = keycode;
-                PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
-                SetBeats(DrumIndex);
-                sprintf(PatternBuf, "%s", PatternIndexToString(PatternIndex));
+                ImGui::Separator();
+                
+                // Show waveform
+                if (ImGui::MenuItem("Show Waveform")) {
+                    waveform_drum_idx = context_menu_drum_idx;
+                    show_waveform_window = true;
+                }
+                
+                // Load new sample
+                if (ImGui::MenuItem("Load Sample...")) {
+                    // Could trigger a file dialog for loading new samples
+                    printf("Load sample for drum %d\n", context_menu_drum_idx);
+                }
+                
+                ImGui::Separator();
+                
+                // Volume control (if available)
+                ImGui::Text("Volume:");
+                static float volume = 1.0f;
+                ImGui::SliderFloat("##volume", &volume, 0.0f, 2.0f, "%.2f");
             }
         }
+        
+        if (!ImGui::IsPopupOpen("DrumContextMenu")) {
+            show_drum_context_menu = false;
+        }
+        
+        ImGui::EndPopup();
+    } else {
+        show_drum_context_menu = false;
     }
+}
 
+void RenderWaveformWindow()
+{
+    if (!show_waveform_window) return;
+    
+    ImGui::Begin("Waveform Viewer", &show_waveform_window);
+    
+    if (waveform_drum_idx >= 0 && waveform_drum_idx < MAX_DRUMS) {
+        tDrum* drum = Pattern[PatternIndex].DrumPattern[waveform_drum_idx].Drum;
+        
+        if (drum != NULL) {
+            ImGui::Text("Waveform for: %s", drum->Name ? drum->Name : "Unknown");
+            ImGui::Text("Sample Number: %d", drum->SampleNum);
+            ImGui::Text("Filename: %s", drum->Filename ? drum->Filename : "None");
+            ImGui::Text("Loaded: %s", drum->Loaded ? "Yes" : "No");
+            
+            // Simple waveform visualization placeholder
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+            ImVec2 canvas_size = ImVec2(400, 100);
+            
+            draw_list->AddRectFilled(canvas_pos, 
+                                   ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                                   IM_COL32(50, 50, 50, 255));
+            
+            draw_list->AddRect(canvas_pos, 
+                             ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                             IM_COL32(255, 255, 255, 255));
+            
+            // Draw a simple sine wave as placeholder
+            for (int i = 0; i < canvas_size.x - 1; i++) {
+                float x1 = canvas_pos.x + i;
+                float x2 = canvas_pos.x + i + 1;
+                float y1 = canvas_pos.y + canvas_size.y / 2 + sin(i * 0.1f) * 30;
+                float y2 = canvas_pos.y + canvas_size.y / 2 + sin((i + 1) * 0.1f) * 30;
+                
+                draw_list->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), IM_COL32(0, 255, 0, 255));
+            }
+            
+            ImGui::Dummy(canvas_size);
+        }
+    }
+    
     ImGui::End();
 }
 
@@ -435,52 +580,99 @@ void RenderPatternDialog()
     ImGui::OpenPopup("Pattern Overview");
     
     bool open = true;
-    if (ImGui::BeginPopupModal("Pattern Overview", &open)) {
+    if (ImGui::BeginPopupModal("Pattern Overview", &open, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Pattern Overview - Click patterns to select, edit beats directly");
+        ImGui::Separator();
+        
         /* Display all patterns with drums and beats */
-        for (int patt = 0; patt < MAX_PATTERNS; patt++) {
-            char patt_char = (char)patt;
-            if (patt_char < 'a' || patt_char > 'z') continue;
-            
+        for (int patt = 'a'; patt <= 'z'; patt++) {
             bool has_content = false;
             for (int drum = 0; drum < MAX_DRUMS; drum++) {
-                unsigned char bytes[2];
-                if (FindBytes((char *)&bytes[0], (char *)&bytes[1], patt, drum) > 0) {
-                    has_content = true;
-                    break;
+                if (Pattern[patt].DrumPattern[drum].Drum != NULL) {
+                    for (int beat = 0; beat < 16; beat++) {
+                        if (Pattern[patt].DrumPattern[drum].beat[beat] > 0) {
+                            has_content = true;
+                            break;
+                        }
+                    }
+                    if (has_content) break;
                 }
             }
             
-            if (!has_content) continue;
+            if (!has_content && patt != PatternIndex) continue;
             
             ImGui::Separator();
-            char patt_label[16];
-            snprintf(patt_label, sizeof(patt_label), "Pattern %c", patt_char);
-            if (ImGui::Button(patt_label)) {
+            
+            // Pattern header with selection button
+            char patt_label[32];
+            snprintf(patt_label, sizeof(patt_label), "Pattern %c%s", 
+                    (char)patt, (patt == PatternIndex) ? " (Current)" : "");
+            
+            bool is_current = (patt == PatternIndex);
+            if (is_current) {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
+            }
+            
+            if (ImGui::Button(patt_label, ImVec2(150, 0))) {
                 set_active_pattern(nullptr, (XtPointer)(intptr_t)patt, nullptr);
             }
             
-            /* Show drums and beats for this pattern */
+            if (is_current) {
+                ImGui::PopStyleColor();
+            }
+            
+            /* Show drums and beats for this pattern - EDITABLE */
             for (int drum = 0; drum < MAX_DRUMS; drum++) {
-                unsigned char bytes[2];
-                if (FindBytes((char *)&bytes[0], (char *)&bytes[1], patt, drum) > 0) {
-                    ImGui::Text("  %s:", Pattern[patt].DrumPattern[drum].Drum->Name);
-                    ImGui::SameLine();
+                if (Pattern[patt].DrumPattern[drum].Drum == NULL) continue;
+                
+                char* drum_name = Pattern[patt].DrumPattern[drum].Drum->Name;
+                if (drum_name == NULL || strncmp(drum_name, "Drum ", 5) == 0) continue;
+                
+                bool has_beats = false;
+                for (int beat = 0; beat < 16; beat++) {
+                    if (Pattern[patt].DrumPattern[drum].beat[beat] > 0) {
+                        has_beats = true;
+                        break;
+                    }
+                }
+                
+                if (!has_beats && patt != PatternIndex) continue;
+                
+                ImGui::Text("  %s:", drum_name);
+                ImGui::SameLine();
+                
+                // Editable beat toggles
+                for (int beat = 0; beat < 16; beat++) {
+                    bool beat_on = Pattern[patt].DrumPattern[drum].beat[beat] > 0;
+                    char beat_id[32];
+                    snprintf(beat_id, sizeof(beat_id), "##p%dd%db%d", patt, drum, beat);
                     
-                    for (int beat = 0; beat < 16; beat++) {
-                        bool beat_on = Pattern[patt].DrumPattern[drum].beat[beat] > 0;
-                        char beat_id[32];
-                        snprintf(beat_id, sizeof(beat_id), "##p%dd%db%d", patt, drum, beat);
-                        
-                        if (ImGui::Checkbox(beat_id, &beat_on)) {
-                            Pattern[patt].DrumPattern[drum].beat[beat] = beat_on ? 1 : 0;
-                        }
-                        if (beat < 15) ImGui::SameLine();
+                    // Color coding for quarter notes
+                    if (beat % 4 == 0) {
+                        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.4f, 0.2f, 0.2f, 1.0f));
+                    }
+                    
+                    if (ImGui::Checkbox(beat_id, &beat_on)) {
+                        Pattern[patt].DrumPattern[drum].beat[beat] = beat_on ? 1 : 0;
+                    }
+                    
+                    if (beat % 4 == 0) {
+                        ImGui::PopStyleColor();
+                    }
+                    
+                    if (beat == 7) {
+                        // Start new line for beats 8-15
+                        ImGui::Text("        "); // Indent
+                        ImGui::SameLine();
+                    } else if (beat < 15) {
+                        ImGui::SameLine();
                     }
                 }
             }
         }
         
-        if (ImGui::Button("OK")) {
+        ImGui::Separator();
+        if (ImGui::Button("Close")) {
             show_pattern_dialog = false;
             ImGui::CloseCurrentPopup();
         }
