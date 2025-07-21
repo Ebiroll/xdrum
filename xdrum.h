@@ -96,7 +96,7 @@ void quit_question(Widget w, XtPointer client_data, XtPointer call_data);
 void quit_application();
 void stop_playing_pattern(Widget w, XtPointer client_cata, XtPointer call_data);
 void stop_playing_song(Widget w, XtPointer client_cata, XtPointer call_data);
-void play_pattern(Widget w, XtPointer client_data, XtPointer call_data);
+void play_pattern_ui(Widget w, XtPointer client_data, XtPointer call_data);
 void play_song(Widget w, XtPointer client_data, XtPointer call_data);
 void SetBeat(Widget w, XtPointer client_data, XtPointer call_data);
 void ChangeDrum(Widget w, XtPointer client_data, XtPointer call_data);

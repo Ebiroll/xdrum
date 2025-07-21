@@ -1,16 +1,9 @@
-/*
- * alsadrum.c - Drum player for Linux using ALSA
- * (C) Olof Astrand, 2025
- * 
- * Modernized version using ALSA instead of OSS /dev/dsp
- * Cleaned up code structure and removed GUS-specific code
- */
-
+// Add these includes at the top of your file
+#include <pthread.h>
+#include <stdbool.h>
+#include <signal.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <math.h>
+#include "drum.h"
 #include <string.h>
 #include <assert.h>
 #include <alsa/asoundlib.h>
@@ -20,11 +13,20 @@
 
 /* Configuration */
 #define MAX_VOICE       32
-#define BUFFER_SIZE     16384
+#define BUFFER_SIZE     65536 * 2 
 #define MAX_DELAY       200000
+// Maximum sample length for loading
 #define SLEN            265535
 //#define MAX_DRUMS       64
 //#define MAX_PATTERNS    32
+
+// Add these global variables for thread control
+static pthread_t audio_thread;
+static pthread_mutex_t audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t audio_cond = PTHREAD_COND_INITIALIZER;
+static volatile bool audio_thread_running = false;
+static volatile bool audio_thread_should_stop = false;
+static volatile bool pattern_playing = false;
 
 #ifndef DRUMS_ROOT_DIR
 #define DRUMS_ROOT_DIR  "."
@@ -42,8 +44,10 @@
 static snd_pcm_t *pcm_handle = NULL;
 static snd_pcm_hw_params_t *hw_params = NULL;
 static unsigned int sample_rate = 44100;
-static unsigned int channels = 1;
+static unsigned int num_channels = 2;
 static snd_pcm_format_t format = SND_PCM_FORMAT_S16_LE;
+int write_audio_buffer(int len);
+extern int beat;
 
 /* Audio buffer management */
 static int left_of_block = BUFFER_SIZE;
@@ -64,44 +68,178 @@ typedef struct {
 } Voice_t;
 
 static Voice_t voices[MAX_VOICE];
+static void play_pattern(int patt, int measure);
 
 /* Global pattern and drum data */
 tDelay delay;
 tDrum         Drum[MAX_DRUMS];
 tPattern      Pattern [MAX_PATTERNS];
 
+/* Voice structure */
+typedef struct {
+    int pattern;
+    int measure;
+    bool loop;  // Whether to loop the pattern
+} PatternRequest;
 
-/* Timing variables */
-static int beat = 0;
-static int pattern_index = 0;
+static PatternRequest current_request;
+static volatile bool new_request = false;
 extern int BPM;
 extern int M;
 
-/* Function prototypes */
-static int open_alsa_device(void);
-void close_alsa_device(void);
-int load_sample(int samplenum, const char *name, int pan, int intel_format);
-static void play_drum(int sample);
-static void parse_drums(const char *filename);
-static void init_pattern(void);
-static void play_pattern(int patt, int measure);
-static int voice_on(int drum_index);
-static int add_one_beat(int length);
-static int write_audio_buffer(void);
-char *add_root(char *name);
-static int stop_playing(void);
+// Audio thread function
+static void* audio_thread_func(void* arg) {
+    PatternRequest local_request;
+    printf("Audio thread started\n");
+    
+    while (!audio_thread_should_stop) {
+        // Wait for a pattern play request
+        printf("Audio thread waiting for request...\n");
+        pthread_mutex_lock(&audio_mutex);
+        while (!new_request && !audio_thread_should_stop) {
+            printf("cond_wait...\n");
+            pthread_cond_wait(&audio_cond, &audio_mutex);
+        }
+        
+        printf("Audio thread woke up\n");
+        if (audio_thread_should_stop) {
+            pthread_mutex_unlock(&audio_mutex);
+            break;
+        }
+        printf("Audio thread received request to play pattern %d, measure %d, loop: %d\n",
+               current_request.pattern, current_request.measure, current_request.loop);
+        
+        // Copy the request
+        local_request = current_request;
+        new_request = false;
+        pattern_playing = true;
+        pthread_mutex_unlock(&audio_mutex);
+        
+        // Play the pattern
+        do {
+            // Do two for test
+            M=0;
+            local_request.measure = 0;
+            printf("Playing pattern %d, measure %d, loop: %d\n",
+                   local_request.pattern, local_request.measure, local_request.loop);
+            play_pattern(local_request.pattern, local_request.measure);
+            play_pattern(local_request.pattern, local_request.measure);
+            
+            // Check if we should stop
+            printf("Checking if we should continue playing...\n");
+            pthread_mutex_lock(&audio_mutex);
+            //bool should_continue = local_request.loop && pattern_playing && !audio_thread_should_stop;
+            bool should_continue = false; // For testing, always stop after one play
+            pthread_mutex_unlock(&audio_mutex);
+            if (!should_continue) {
+                printf("Stopping pattern playback\n");
+            }
+            
+            if (!should_continue) break;
+            
+        } while (true);
+        
+        // Pattern finished
+        pthread_mutex_lock(&audio_mutex);
+        pattern_playing = false;
+        pthread_mutex_unlock(&audio_mutex);
+    }
+    
+    return NULL;
+}
+
+// Initialize the audio thread
+int init_audio_thread(void) {
+    if (audio_thread_running) {
+        return 0; // Already running
+    }
+    
+    audio_thread_should_stop = false;
+    
+    if (pthread_create(&audio_thread, NULL, audio_thread_func, NULL) != 0) {
+        fprintf(stderr, "Failed to create audio thread\n");
+        return -1;
+    }
+    
+    audio_thread_running = true;
+    return 0;
+}
 
 void starttimer(void) {
 
+
 }
+// Shutdown the audio thread
+void shutdown_audio_thread(void) {
+    if (!audio_thread_running) {
+        return;
+    }
+    printf("shutdown_audio_thread...\n");
+    // Print audio_mutex state for debugging
+    printf("audio_mutex state: %d\n", pthread_mutex_trylock(&audio_mutex));
+
+    pthread_mutex_lock(&audio_mutex);
+    audio_thread_should_stop = true;
+    pattern_playing = false;
+    pthread_cond_signal(&audio_cond);
+    pthread_mutex_unlock(&audio_mutex);
+    
+    pthread_join(audio_thread, NULL);
+    audio_thread_running = false;
+}
+
+// Thread-safe version of PlayPattern
+void PlayPatternThreaded(int pattern, int measure, bool loop) {
+    //printf("Requesting to play pattern %d, measure %d, loop: %d\n", pattern, measure, loop);
+    pthread_mutex_lock(&audio_mutex);
+    //printf("Lock acquired, setting request...\n");
+    current_request.pattern = pattern;
+    current_request.measure = measure;
+    current_request.loop = loop;
+    new_request = true;
+    pthread_cond_signal(&audio_cond);
+    //printf("Signal sent, unlocking mutex...\n");
+    pthread_mutex_unlock(&audio_mutex);
+}
+
+// Stop the currently playing pattern
+void StopPattern(void) {
+    pthread_mutex_lock(&audio_mutex);
+    pattern_playing = false;
+    pthread_mutex_unlock(&audio_mutex);
+    
+    // Also call the existing stop function to finish audio
+    stop_playing();
+}
+
+// Check if a pattern is currently playing
+bool IsPatternPlaying(void) {
+    bool playing;
+    pthread_mutex_lock(&audio_mutex);
+    playing = pattern_playing;
+    pthread_mutex_unlock(&audio_mutex);
+    return playing;
+}
+
+// Get current beat position (thread-safe)
+int GetCurrentBeat(void) {
+    int current_beat;
+    pthread_mutex_lock(&audio_mutex);
+    // OLAS TODO!! current_beat = beat;
+    pthread_mutex_unlock(&audio_mutex);
+    return current_beat;
+}
+
 
 
 int StopPlaying(void) {
    return stop_playing();
 }
 void PlayPattern(int Patt, int Measure) {
+   exit(0); // This function is not used in the new implementation
    play_pattern(Patt, Measure);
 }
+
 
 int EmptyCard (void)
 {
@@ -111,9 +249,135 @@ int EmptyCard (void)
       Drum[i].Loaded=0;
    }
 /* TODO fix the memory leakage */
-      
-   
+         
 }
+
+
+
+
+/* Play a pattern */
+static void play_pattern(int patt, int measure)
+{
+    int sample_len;
+    int crossed_limit, next_patt;
+    static int remember_patt;
+
+    if (beat > 0) {
+        next_patt = patt;
+        patt = remember_patt;
+    }
+
+    /* Calculate length of 1/4 beat in samples */
+    // 44100 samples per second * 60 seconds per minute / BPM is 
+    // 1 beat = 44100 / 4 = 11025 samples
+    double tpb = (double)(1500 / (double)BPM); // Ticks per Beat
+    double tum = (double)measure * (24000 / (double)BPM); // Ticks per Measure
+    sample_len = 44100 *num_channels  *60 / BPM;
+
+    for (int i = beat; i < 16; i++) {
+        /* Trigger drums for this beat */
+        for (int j = 0; j < MAX_DRUMS; j++) {
+            if (Pattern[patt].DrumPattern[j].Drum != NULL) {
+                if (Pattern[patt].DrumPattern[j].beat[i] > 0) {
+                    voice_on(Pattern[patt].DrumPattern[j].Drum->SampleNum);
+                    printf("Playing drum %d in pattern %d, beat %d\n", 
+                           Pattern[patt].DrumPattern[j].Drum->SampleNum, patt, i);
+                }
+            }
+        }
+
+        beat++;
+        crossed_limit = add_one_beat(sample_len + 1);
+        
+        if (crossed_limit == 1) {
+            break;
+        }
+    }
+
+    if (beat > 15) {
+        beat = 0;
+        //M++;
+        patt = next_patt;
+    }
+
+    remember_patt = patt;
+}
+
+
+/* Stop playing and finish remaining audio */
+int stop_playing(void)
+{
+    int max_j = 0;
+    int crossed_limit = 0;
+
+    memset(tmpstore, 0, (BUFFER_SIZE + 1) * sizeof(long));
+
+    /* Process remaining audio from active voices */
+    for (int voi = 0; voi < MAX_VOICE; voi++) {
+        if (voices[voi].count > -1) {
+            for (int j = 0; j <= BUFFER_SIZE; j++) {
+                if (voices[voi].count > voices[voi].length) {
+                    if (j > max_j) {
+                        max_j = j;
+                    }
+                    voices[voi].count = -1;
+                    break;
+                } else {
+                    tmpstore[j] += *voices[voi].pointer;
+                    voices[voi].pointer++;
+                    voices[voi].count++;
+                }
+            }
+        }
+    }
+
+    /* Convert and output remaining samples */
+    for (int j = 0; j < max_j; j++) {
+        short sample_value;
+        if (tmpstore[j] > 32767) {
+            sample_value = 32767;
+        } else if (tmpstore[j] < -32767) {
+            sample_value = -32768;
+        } else {
+            sample_value = (short)tmpstore[j];
+        }
+
+        data[block_counter] = (unsigned char)(sample_value & 0xFF);
+        data[block_counter + 1] = (unsigned char)((sample_value >> 8) & 0xFF);
+
+        left_of_block -= 2;
+        block_counter += 2;
+
+        if (left_of_block < 1) {
+            crossed_limit = 1;
+            write_audio_buffer(block_counter);
+            left_of_block = BUFFER_SIZE;
+            block_counter = 0;
+        }
+    }
+
+    /* Fill rest with silence */
+    while (left_of_block > 0) {
+        data[block_counter] = 0;
+        data[block_counter + 1] = 0;
+        left_of_block -= 2;
+        block_counter += 2;
+    }
+
+    write_audio_buffer(block_counter);
+    beat = 0;
+
+    /* Clear delay buffer */
+    memset(delay_data, 0, MAX_DELAY * sizeof(short));
+
+    return crossed_limit;
+}
+
+
+unsigned long GetUpdateIntervall(int PattI)  {
+  return (unsigned long)(1000 * 240 / BPM);
+}
+
 
 
 /* Open ALSA device for playback */
@@ -155,7 +419,7 @@ static int open_alsa_device(void)
     }
 
     /* Set channel count */
-    err = snd_pcm_hw_params_set_channels(pcm_handle, hw_params, channels);
+    err = snd_pcm_hw_params_set_channels(pcm_handle, hw_params, num_channels);
     if (err < 0) {
         fprintf(stderr, "Cannot set channel count: %s\n", snd_strerror(err));
         return -1;
@@ -174,8 +438,16 @@ static int open_alsa_device(void)
         sample_rate = actual_rate;
     }
 
+    // Set buffer size (in frames)
+    snd_pcm_uframes_t buffer_frames = BUFFER_SIZE * 4 / (num_channels * 2);
+    err = snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_frames);
+    if (err < 0) {
+        fprintf(stderr, "Cannot set buffer size: %s\n", snd_strerror(err));
+        return -1;
+    }
+
     /* Set period size */
-    frames = BUFFER_SIZE / (channels * 2); /* 2 bytes per sample for S16 */
+    frames = BUFFER_SIZE / (num_channels * 2); /* 2 bytes per sample for S16 */
     err = snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &frames, 0);
     if (err < 0) {
         fprintf(stderr, "Cannot set period size: %s\n", snd_strerror(err));
@@ -207,6 +479,11 @@ static int open_alsa_device(void)
 /* Close ALSA device */
 void close_alsa_device(void)
 {
+    shutdown_audio_thread();
+    // Wait for audio thread to finish
+    if (audio_thread_running) {
+        pthread_join(audio_thread, NULL);
+    }
     if (pcm_handle) {
         snd_pcm_drain(pcm_handle);
         snd_pcm_close(pcm_handle);
@@ -215,12 +492,15 @@ void close_alsa_device(void)
 }
 
 /* Write audio buffer to ALSA */
-static int write_audio_buffer(void)
+int write_audio_buffer(int length)
 {
     snd_pcm_sframes_t frames_written;
-    int frames_to_write = BUFFER_SIZE / (channels * 2); /* 2 bytes per sample */
+    int frames_to_write = length; 
+    //BUFFER_SIZE / (num_channels * 2); /* 2 bytes per sample */
+    printf("%d secs of audio to write %ld frames\n", frames_to_write / (sample_rate * num_channels), frames_to_write);
 
     frames_written = snd_pcm_writei(pcm_handle, data, frames_to_write);
+    printf("Wrote %ld frames to ALSA\n", frames_written);
     
     if (frames_written < 0) {
         /* Handle underrun */
@@ -234,7 +514,7 @@ static int write_audio_buffer(void)
     } else if (frames_written < frames_to_write) {
         fprintf(stderr, "Short write: wrote %ld of %d frames\n", 
                 frames_written, frames_to_write);
-    }
+    } 
 
     return 0;
 }
@@ -328,6 +608,7 @@ static void parse_drums(const char *filename)
 
     strcpy(filepath, filename);
     add_root(filepath);
+    printf("Parsing drums file: %s\n", filepath);
 
     if ((drum_fd = fopen(filepath, "r")) == NULL) {
         perror(filepath);
@@ -365,7 +646,7 @@ static void parse_drums(const char *filename)
 }
 
 /* Start playing a voice */
-static int voice_on(int drum_index)
+int voice_on(int drum_index)
 {
     int j = 0;
 
@@ -395,12 +676,13 @@ static int voice_on(int drum_index)
 }
 
 /* Add one beat worth of audio data */
-static int add_one_beat(int length)
+int add_one_beat(int length)
 {
     int crossed_limit = 0;
 
     /* Clear temporary buffer */
     memset(tmpstore, 0, (length + 1) * sizeof(long));
+    printf("Adding one beat of length %d\n", length);
 
     /* Mix all active voices */
     for (int voi = 0; voi < MAX_VOICE; voi++) {
@@ -472,7 +754,7 @@ static int add_one_beat(int length)
         /* Write buffer if full */
         if (left_of_block < 1) {
             crossed_limit = 1;
-            write_audio_buffer();
+            write_audio_buffer(block_counter);
             left_of_block = BUFFER_SIZE;
             block_counter = 0;
         }
@@ -480,128 +762,6 @@ static int add_one_beat(int length)
 
     return crossed_limit;
 }
-
-/* Play a pattern */
-static void play_pattern(int patt, int measure)
-{
-    int sample_len;
-    int crossed_limit, next_patt;
-    static int remember_patt;
-
-    if (beat > 0) {
-        next_patt = patt;
-        patt = remember_patt;
-    }
-
-    /* Calculate length of 1/4 beat in samples */
-    sample_len = 660000 / BPM;
-
-    for (int i = beat; i < 16; i++) {
-        /* Trigger drums for this beat */
-        for (int j = 0; j < MAX_DRUMS; j++) {
-            if (Pattern[patt].DrumPattern[j].Drum != NULL) {
-                if (Pattern[patt].DrumPattern[j].beat[i] > 0) {
-                    voice_on(Pattern[patt].DrumPattern[j].Drum->SampleNum);
-                }
-            }
-        }
-
-        beat++;
-        crossed_limit = add_one_beat(sample_len + 1);
-        
-        if (crossed_limit == 1) {
-            break;
-        }
-    }
-
-    if (beat > 15) {
-        beat = 0;
-        M++;
-        patt = next_patt;
-    }
-
-    remember_patt = patt;
-}
-
-/* Stop playing and finish remaining audio */
-static int stop_playing(void)
-{
-    int max_j = 0;
-    int crossed_limit = 0;
-
-    memset(tmpstore, 0, (BUFFER_SIZE + 1) * sizeof(long));
-
-    /* Process remaining audio from active voices */
-    for (int voi = 0; voi < MAX_VOICE; voi++) {
-        if (voices[voi].count > -1) {
-            for (int j = 0; j <= BUFFER_SIZE; j++) {
-                if (voices[voi].count > voices[voi].length) {
-                    if (j > max_j) {
-                        max_j = j;
-                    }
-                    voices[voi].count = -1;
-                    break;
-                } else {
-                    tmpstore[j] += *voices[voi].pointer;
-                    voices[voi].pointer++;
-                    voices[voi].count++;
-                }
-            }
-        }
-    }
-
-    /* Convert and output remaining samples */
-    for (int j = 0; j < max_j; j++) {
-        short sample_value;
-        if (tmpstore[j] > 32767) {
-            sample_value = 32767;
-        } else if (tmpstore[j] < -32767) {
-            sample_value = -32768;
-        } else {
-            sample_value = (short)tmpstore[j];
-        }
-
-        data[block_counter] = (unsigned char)(sample_value & 0xFF);
-        data[block_counter + 1] = (unsigned char)((sample_value >> 8) & 0xFF);
-
-        left_of_block -= 2;
-        block_counter += 2;
-
-        if (left_of_block < 1) {
-            crossed_limit = 1;
-            write_audio_buffer();
-            left_of_block = BUFFER_SIZE;
-            block_counter = 0;
-        }
-    }
-
-    /* Fill rest with silence */
-    while (left_of_block > 0) {
-        data[block_counter] = 0;
-        data[block_counter + 1] = 0;
-        left_of_block -= 2;
-        block_counter += 2;
-    }
-
-    write_audio_buffer();
-    beat = 0;
-
-    /* Clear delay buffer */
-    memset(delay_data, 0, MAX_DELAY * sizeof(short));
-
-    return crossed_limit;
-}
-
-/* Calculate update interval */
-unsigned long get_update_interval(int patt_index)
-{
-    return (unsigned long)(1000 * 240 / BPM);
-}
-
-unsigned long GetUpdateIntervall(int PattI)  {
-   return (get_update_interval(PattI));
-}
-
 
 // Implementation:
 int init_audio_system(void) 
@@ -612,47 +772,49 @@ int init_audio_system(void)
     return open_alsa_device();
 }
 
-/* Main entry point */
+
+// Modified MAIN function with thread initialization
 int MAIN(int argc, char *argv[])
 {
-    /* Initialize ALSA */
-
-       // Initialize audio system
+    // Initialize ALSA
     if (init_audio_system() < 0) {
         fprintf(stderr, "Warning: Failed to initialize audio system\n");
-        // You might want to continue without audio or exit
+        return -1;
     }
 
-    /* Initialize delay effect */
+    // Initialize delay effect
+    #if 1
     memset(delay_data, 0, MAX_DELAY * sizeof(short));
     delay_pointer = 0;
     delay.Delay16thBeats = 230;
     delay.leftc = 0.5;
     delay.rightc = 0.5;
     delay.pointer = &delay_data[MAX_DELAY / 2];
-    delay.On = 0; /* Disabled by default */
+    #endif
+    delay.On = 0;
 
-    /* Initialize patterns and drums */
+    // Initialize patterns and drums
     init_pattern();
 
-    /* Parse drums configuration */
+    // Parse drums configuration
     parse_drums("DRUMS");
 
-    /* Main playback loop would go here */
-    /* This is just a skeleton - you'd need to add:
-     * - Pattern loading
-     * - Main timing loop
-     * - User interface
-     * - Pattern sequencing
-     */
+    // Initialize audio thread
+    if (init_audio_thread() < 0) {
+        fprintf(stderr, "Failed to initialize audio thread\n");
+        close_alsa_device();
+        return -1;
+    }
 
-    /* Example: Play pattern 0 for 4 measures */
-    //for (int measure = 0; measure < 4; measure++) {
-    //    play_pattern(0, measure);
-    //}
+    // Your ImGui main loop would go here
+    // Example usage:
+    // PlayPatternThreaded(0, 0, true);  // Play pattern 0, looping
+    // ...
+    // StopPattern();  // Stop playing
 
-    /* Stop and cleanup */
-    stop_playing();
+    // Cleanup
+    //shutdown_audio_thread();
+    // stop_playing();
     // close_alsa_device();
 
     /* Free allocated memory */

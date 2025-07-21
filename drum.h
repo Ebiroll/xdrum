@@ -13,7 +13,7 @@
 
 #ifndef _DRUM_H
 #define _DRUM_H
-
+#include <stdbool.h>
 
 #define MAX_DRUMS 120
 #define MAX_PATTERNS 255
@@ -58,7 +58,6 @@ typedef struct {
      
 extern int MAIN(int argc, char **argv); 
 extern void starttimer(void);
-extern void PlayPattern(int Patt,int Measure);
 extern unsigned long GetUpdateIntervall(int PattI);
 extern int StopPlaying(void);
 extern int EmptyCard(void);
@@ -68,6 +67,10 @@ void SetBeats(int DrumNr);
 
 #ifdef ALSADRUM
 void close_alsa_device(void);
+void PlayPatternThreaded(int pattern, int measure, bool loop);
+int stop_playing(void);
+#else
+extern void PlayPattern(int Patt,int Measure);
 #endif
 #endif
 

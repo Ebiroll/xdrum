@@ -36,6 +36,7 @@ extern "C" {
 #include <assert.h>
 
 extern tDelay delay;
+int beat;
 
 /* Global variables - same as original */
 int DrumIndex = 0;
@@ -281,14 +282,19 @@ void RenderMainWindow()
         }
         
         any_drum_shown = true;
+
+        // FIX: Push a unique ID for this drum row to prevent ID conflicts.
+        ImGui::PushID(drum_idx);
         
         // Drum name button with right-click context menu
         bool is_selected = (drum_idx == DrumIndex);
         if (is_selected) {
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
         }
+        char button_label[64];
+        snprintf(button_label, sizeof(button_label), "%s##drum%d", drum_name, drum_idx);
         
-        if (ImGui::Button(drum_name, ImVec2(80, 0))) {
+        if (ImGui::Button(button_label, ImVec2(80, 0))) {
             ChangeDrum(nullptr, (XtPointer)(intptr_t)drum_idx, nullptr);
         }
         
@@ -308,14 +314,15 @@ void RenderMainWindow()
         // Beat toggles for this drum
         for (int i = 0; i < 16; i++) {
             if (i == 8) {
-                // New line for beats 8-15
-                ImGui::Text("        "); // Indent
+                // New line for beats 8-15 - indent with an invisible dummy widget.
+                ImGui::Dummy(ImVec2(88.0f, 0.0f));
                 ImGui::SameLine();
             }
             
             bool beat_on = Pattern[PatternIndex].DrumPattern[drum_idx].beat[i] > 0;
+            // The ID is now scoped by PushID, but a specific label is still good practice.
             char beat_id[32];
-            snprintf(beat_id, sizeof(beat_id), "##d%db%d", drum_idx, i);
+            snprintf(beat_id, sizeof(beat_id), "##beat%d", i);
             
             // Color coding for quarter notes
             if (i % 4 == 0) {
@@ -335,15 +342,16 @@ void RenderMainWindow()
         
         // Beat numbers guide (only show for selected drum)
         if (drum_idx == DrumIndex) {
-            ImGui::Text("        "); // Indent
+            // Indent the first row of numbers to align with the checkboxes.
+            ImGui::Dummy(ImVec2(88.0f, 0.0f));
             ImGui::SameLine();
+            
             for (int i = 0; i < 16; i++) {
+                // FIX: Correctly indent the second row of numbers without a faulty NewLine.
                 if (i == 8) {
-                 // New line for beats 8-15, but use an unlabeled Dummy for indentation
-                 ImGui::NewLine();
-                 ImGui::SameLine();
-                 ImGui::Dummy(ImVec2(90, 0)); // adjust 90px to match your drum‑button width
-                 ImGui::SameLine(); 
+                    // We are on a new line, just indent and continue.
+                    ImGui::Dummy(ImVec2(88.0f, 0.0f));
+                    ImGui::SameLine();
                 }
                 ImGui::Text("%d", i % 4);
                 if (i < 15 && i != 7) {
@@ -353,6 +361,9 @@ void RenderMainWindow()
                 }
             }
         }
+        
+        // FIX: Pop the ID for this drum row.
+        ImGui::PopID();
     }
     
     if (!any_drum_shown) {
@@ -380,7 +391,9 @@ void RenderMainWindow()
         }
         
         if (drums_per_row > 0) ImGui::SameLine();
-        
+
+        // Push ID here as well, since buttons may have the same name in different patterns
+        ImGui::PushID(i);
         if (ImGui::Button(drum_name, ImVec2(100, 0))) {
             ChangeDrum(nullptr, (XtPointer)(intptr_t)i, nullptr);
         }
@@ -391,6 +404,7 @@ void RenderMainWindow()
             show_drum_context_menu = true;
             ImGui::OpenPopup("DrumContextMenu");
         }
+        ImGui::PopID();
         
         drums_per_row++;
     }
@@ -406,7 +420,7 @@ void RenderMainWindow()
     /* Playback controls */
     ImGui::Separator();
     if (ImGui::Button("Play Pattern") && !is_playing && !is_song_playing) {
-        play_pattern(nullptr, nullptr, nullptr);
+        play_pattern_ui(nullptr, nullptr, nullptr);
     }
     ImGui::SameLine();
     if (ImGui::Button("Stop Pattern") && is_playing) {
@@ -448,7 +462,7 @@ void RenderMainWindow()
                               is_song_playing ? ImGuiInputTextFlags_ReadOnly : 0);
 
     ImGui::End();
-}
+} 
 
 void RenderDrumContextMenu()
 {
@@ -731,7 +745,8 @@ void UpdateTimers()
     if (is_playing && need_pattern_update) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             now - last_update_time).count();
-        
+
+           // printf("Elapsed time since last update: %ld ms , interval %ld ms\n", elapsed, UpdateIntervall);
         if (elapsed >= UpdateIntervall) {
             PlayMeasure(nullptr, nullptr);
             last_update_time = now;
@@ -816,6 +831,7 @@ void ChangeDrum(Widget w, XtPointer client_data, XtPointer call_data)
 
 void quit_application()
 {
+    close_alsa_device();
     glfwSetWindowShouldClose(window, GLFW_TRUE);
 }
 
@@ -847,7 +863,7 @@ void UpdateSong(XtPointer client_data, XtIntervalId *Dummy)
 
 void PlayMeasure(XtPointer client_data, XtIntervalId *Dummy)
 {
-    PlayPattern(PatternIndex, M);
+    PlayPatternThreaded(PatternIndex, M, false);
     M++;
     need_pattern_update = true;
 }
@@ -869,12 +885,12 @@ void PlaySongMeasure(XtPointer client_data, XtIntervalId *Dummy)
         SongM = M;
     }
     
-    PlayPattern(SongPatternIndex, SongM);
+    PlayPatternThreaded(SongPatternIndex, SongM,false);
     M++;
     need_pattern_update = true;
 }
 
-void play_pattern(Widget w, XtPointer client_data, XtPointer call_data)
+void play_pattern_ui(Widget w, XtPointer client_data, XtPointer call_data)
 {
     SongPlay = 0;
 
@@ -889,7 +905,7 @@ void play_pattern(Widget w, XtPointer client_data, XtPointer call_data)
     
     starttimer();
     M = 0;
-    PlayPattern(PatternIndex, 0);
+    PlayPatternThreaded(PatternIndex, 0, true);
 
     if (gettimeofday(&StartTime, &DummyTz) < 0) {
         fprintf(stderr, "Something went wrong with the time call");
@@ -924,7 +940,7 @@ void play_song(Widget w, XtPointer client_data, XtPointer call_data)
     
     starttimer();
     M = 0;
-    PlayPattern(SongPatternIndex, 0);
+    PlayPatternThreaded(SongPatternIndex, 0, false);
 
     if (gettimeofday(&StartTime, &DummyTz) < 0) {
         fprintf(stderr, "Something went wrong with the time call..\n");
