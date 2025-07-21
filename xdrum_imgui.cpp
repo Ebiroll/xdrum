@@ -24,9 +24,11 @@
 #include <chrono>
 #include <thread>
 
+extern "C" {
 #include "xdrum.h"
 #include "drum.h"
 #include "files.h"
+}
 
 #include <assert.h>
 
@@ -63,7 +65,7 @@ char speed_buf[7] = "120";
 char limit_buf[LIMIT_LEN];
 char PatternBuf[3] = "a";
 char SongBuf[SONG_BUF_LENGTH] = "aaaa";
-char song_name_buf[NAME_LENGTH] = "test.sng";
+char song_name_buf[NAME_LEN] = "test.sng";
 
 char *edit_buf;
 int x1_old = 0, x2_old = 0;
@@ -84,6 +86,10 @@ void RenderFileDialog();
 void RenderPatternDialog();
 void RenderDelayDialog();
 void UpdateTimers();
+void set_active_pattern(Widget w, XtPointer client_data, XtPointer call_data);
+void PlayMeasure(XtPointer client_data, XtIntervalId *Dummy);
+void UpdateSong(XtPointer client_data, XtIntervalId *Dummy);
+
 
 int main(int argc, char **argv)
 {
@@ -271,7 +277,7 @@ void RenderMainWindow()
     if (ImGui::IsWindowFocused() && !ImGui::IsAnyItemActive()) {
         ImGuiIO& io = ImGui::GetIO();
         for (int key = ImGuiKey_A; key <= ImGuiKey_Z; key++) {
-            if (ImGui::IsKeyPressed(key)) {
+            if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(key))) {
                 int keycode = key - ImGuiKey_A + 'a';
                 
                 if (io.KeyShift) {
@@ -338,7 +344,7 @@ void RenderPatternDialog()
             bool has_content = false;
             for (int drum = 0; drum < MAX_DRUMS; drum++) {
                 unsigned char bytes[2];
-                if (FindBytes(&bytes[0], &bytes[1], patt, drum) > 0) {
+                if (FindBytes((char *)&bytes[0], (char *)&bytes[1], patt, drum) > 0) {
                     has_content = true;
                     break;
                 }
@@ -356,7 +362,7 @@ void RenderPatternDialog()
             /* Show drums and beats for this pattern */
             for (int drum = 0; drum < MAX_DRUMS; drum++) {
                 unsigned char bytes[2];
-                if (FindBytes(&bytes[0], &bytes[1], patt, drum) > 0) {
+                if (FindBytes((char *)&bytes[0], (char *)&bytes[1], patt, drum) > 0) {
                     ImGui::Text("  %s:", Pattern[patt].DrumPattern[drum].Drum->Name);
                     ImGui::SameLine();
                     
@@ -453,7 +459,7 @@ void UpdateTimers()
 
 void SetBeat(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    int BeatNr = (int)client_data;
+    int BeatNr = (int)(intptr_t)(client_data);
 
     if (Pattern[PatternIndex].DrumPattern[DrumIndex].beat[BeatNr] > 0) {
         Pattern[PatternIndex].DrumPattern[DrumIndex].beat[BeatNr] = 0;
@@ -469,8 +475,8 @@ void SetBeats(int DrumNr)
 
 void ChangeDrum(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    printf("Change drum to %d\n", (int)client_data);
-    int DrumNr = (int)client_data;
+    printf("Change drum to %d\n", (int)(intptr_t)(client_data));
+    int DrumNr = (int)(intptr_t)(client_data);
     
     /* Bounds checking */
     if (DrumNr < 0 || DrumNr >= MAX_DRUMS) {
@@ -668,7 +674,7 @@ void save_file()
 
 void set_active_pattern(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    PatternIndex = (int)client_data;
+    PatternIndex = (int)(intptr_t)(client_data);
     PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
     SetBeats(DrumIndex);
     PatternBuf[0] = (char)PatternIndex;

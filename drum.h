@@ -63,5 +63,11 @@ extern unsigned long GetUpdateIntervall(int PattI);
 extern int StopPlaying(void);
 extern int EmptyCard(void);
 extern int load_sample (int samplenum,const char *name,int pan,int Intel);
+void CopyBeat(int FromPattern, int ToPattern);
+void SetBeats(int DrumNr);
+
+#ifdef ALSADRUM
+void close_alsa_device(void);
+#endif
 #endif
 

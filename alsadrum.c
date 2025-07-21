@@ -79,7 +79,7 @@ extern int M;
 
 /* Function prototypes */
 static int open_alsa_device(void);
- void close_alsa_device(void);
+void close_alsa_device(void);
 int load_sample(int samplenum, const char *name, int pan, int intel_format);
 static void play_drum(int sample);
 static void parse_drums(const char *filename);

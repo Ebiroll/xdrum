@@ -43,6 +43,9 @@ files.o:  files.c drum.h
 xdrum.o: xdrum.c drum.h
 	gcc -c $(F) -g -o xdrum.o -I$(INCL) xdrum.c
 
+xdrum_imgui.o: xdrum_imgui.cpp drum.h
+	g++ -c $(F) -g -o xdrum_imgui.o -I$(INCL) xdrum_imgui.cpp
+
 widget.o: widget.c drum.h
 	gcc -c $(F) -o widget.o -I$(INCL) widget.c
 
@@ -53,8 +56,8 @@ sbdrum.o: gdrum.h sbdrum.c drum.h
 xdrum: sbdrum.o xdrum.o widget.o files.o  
 	gcc -L$(LIBR) xdrum.o widget.o sbdrum.o files.o -lXaw -lXmu -lXt -lX11  -o xdrum
 
-modern: alsadrum.o xdrum.o widget.o files.o  
-	gcc -L$(LIBR) -g xdrum.o widget.o alsadrum.o files.o -lXaw -lXmu -lXt -lX11 -lasound  -o xdrum
+modern: alsadrum.o xdrum_imgui.o widget.o files.o  
+	g++ -L$(LIBR) -g xdrum_imgui.o widget.o alsadrum.o files.o -lXaw -lXmu -lXt -lX11 -lasound  -o xdrum
 
 clean:
 	rm -f  xdrum  *.o
