@@ -114,7 +114,7 @@ int main(int argc, char **argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
     /* Create window */
-    window = glfwCreateWindow(900, 700, "XDrum/V1.5 - ImGui Port", NULL, NULL);
+    window = glfwCreateWindow(1200, 700, "XDrum/V1.5 - ImGui Port", NULL, NULL);
     if (window == NULL)
         return -1;
 
@@ -339,8 +339,11 @@ void RenderMainWindow()
             ImGui::SameLine();
             for (int i = 0; i < 16; i++) {
                 if (i == 8) {
-                    ImGui::Text("        ");
-                    ImGui::SameLine();
+                 // New line for beats 8-15, but use an unlabeled Dummy for indentation
+                 ImGui::NewLine();
+                 ImGui::SameLine();
+                 ImGui::Dummy(ImVec2(90, 0)); // adjust 90px to match your drum‑button width
+                 ImGui::SameLine(); 
                 }
                 ImGui::Text("%d", i % 4);
                 if (i < 15 && i != 7) {
@@ -661,11 +664,11 @@ void RenderPatternDialog()
                     }
                     
                     if (beat == 7) {
-                        // Start new line for beats 8-15
-                        ImGui::Text("        "); // Indent
-                        ImGui::SameLine();
+                      // Start new line for beats 8-15
+                      ImGui::Dummy(ImVec2(90, 0)); // invisible indent
+                      ImGui::SameLine();                    
                     } else if (beat < 15) {
-                        ImGui::SameLine();
+                      ImGui::SameLine();
                     }
                 }
             }
