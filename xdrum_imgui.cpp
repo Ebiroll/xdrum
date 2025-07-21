@@ -15,6 +15,8 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <sys/errno.h>
 #include <signal.h>
@@ -122,7 +124,7 @@ int main(int argc, char **argv)
     ImGui_ImplOpenGL3_Init(glsl_version);
 
     /* Initialize patterns and drums */
-    PatternIndex = 'a'; // ASCII value for 'a'
+    PatternIndex = StringToPatternIndex("a");
     
     /* Initialize the sound card */
     MAIN(argc, argv);
@@ -181,19 +183,174 @@ void RenderMainWindow()
 {
     ImGui::Begin("XDrum Control Panel", nullptr, ImGuiWindowFlags_NoCollapse);
 
+    /* Pattern name display at top */
+    ImGui::Text("Current Pattern:");
+    ImGui::SameLine();
+    if (ImGui::Button(PatternBuf, ImVec2(40, 0))) {
+        show_pattern_dialog = true;
+    }
+    ImGui::SameLine();
+    ImGui::Text("(Press A-Z to switch patterns, Shift+A-Z to copy)");
+
+    ImGui::Separator();
+
+    /* Beat patterns for all loaded drums in current pattern */
+    ImGui::Text("Beat Patterns:");
+    
+    bool any_drum_shown = false;
+    for (int drum_idx = 0; drum_idx < MAX_DRUMS; drum_idx++) {
+        // Skip uninitialized drums
+        if (Pattern[PatternIndex].DrumPattern[drum_idx].Drum == NULL) {
+            continue;
+        }
+        
+        // Skip drums with generic names (unloaded)
+        char* drum_name = Pattern[PatternIndex].DrumPattern[drum_idx].Drum->Name;
+        if (drum_name == NULL || strncmp(drum_name, "Drum ", 5) == 0) {
+            continue;
+        }
+        
+        // Check if this drum has any beats
+        bool has_beats = false;
+        for (int b = 0; b < 16; b++) {
+            if (Pattern[PatternIndex].DrumPattern[drum_idx].beat[b] > 0) {
+                has_beats = true;
+                break;
+            }
+        }
+        
+        // Always show the currently selected drum
+        if (drum_idx != DrumIndex && !has_beats) {
+            continue;
+        }
+        
+        any_drum_shown = true;
+        
+        // Drum name button
+        bool is_selected = (drum_idx == DrumIndex);
+        if (is_selected) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
+        }
+        
+        if (ImGui::Button(drum_name, ImVec2(80, 0))) {
+            ChangeDrum(nullptr, (XtPointer)(intptr_t)drum_idx, nullptr);
+        }
+        
+        if (is_selected) {
+            ImGui::PopStyleColor();
+        }
+        
+        ImGui::SameLine();
+        
+        // Beat toggles for this drum
+        for (int i = 0; i < 16; i++) {
+            if (i == 8) {
+                // New line for beats 8-15
+                ImGui::Text("        "); // Indent
+                ImGui::SameLine();
+            }
+            
+            bool beat_on = Pattern[PatternIndex].DrumPattern[drum_idx].beat[i] > 0;
+            char beat_id[32];
+            snprintf(beat_id, sizeof(beat_id), "##d%db%d", drum_idx, i);
+            
+            // Color coding for quarter notes
+            if (i % 4 == 0) {
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.4f, 0.2f, 0.2f, 1.0f));
+            }
+            
+            if (ImGui::Checkbox(beat_id, &beat_on)) {
+                Pattern[PatternIndex].DrumPattern[drum_idx].beat[i] = beat_on ? 1 : 0;
+            }
+            
+            if (i % 4 == 0) {
+                ImGui::PopStyleColor();
+            }
+            
+            if (i < 15 && i != 7) ImGui::SameLine();
+        }
+        
+        // Beat numbers guide (only show for selected drum)
+        if (drum_idx == DrumIndex) {
+            ImGui::Text("        "); // Indent
+            ImGui::SameLine();
+            for (int i = 0; i < 16; i++) {
+                if (i == 8) {
+                    ImGui::Text("        ");
+                    ImGui::SameLine();
+                }
+                ImGui::Text("%d", i % 4);
+                if (i < 15 && i != 7) {
+                    ImGui::SameLine();
+                    ImGui::Dummy(ImVec2(14, 0)); // Spacing to align with checkboxes
+                    ImGui::SameLine();
+                }
+            }
+        }
+    }
+    
+    if (!any_drum_shown) {
+        ImGui::Text("No drums loaded in this pattern");
+    }
+
+    ImGui::Separator();
+
+    /* Drum selection - only show loaded drums */
+    ImGui::Text("Load/Select Drum:");
+    int drums_per_row = 0;
+    for (int i = 0; i < MAX_DRUMS; i++) {
+        if (Pattern[PatternIndex].DrumPattern[i].Drum == NULL) {
+            continue;
+        }
+        
+        char* drum_name = Pattern[PatternIndex].DrumPattern[i].Drum->Name;
+        if (drum_name == NULL) {
+            continue;
+        }
+        
+        // Show all drums here (even with generic names) for loading
+        if (drums_per_row > 0 && drums_per_row % 4 == 0) {
+            drums_per_row = 0; // New row
+        }
+        
+        if (drums_per_row > 0) ImGui::SameLine();
+        
+        if (ImGui::Button(drum_name, ImVec2(100, 0))) {
+            ChangeDrum(nullptr, (XtPointer)(intptr_t)i, nullptr);
+        }
+        
+        drums_per_row++;
+    }
+
+    ImGui::Separator();
+
     /* Speed/BPM control */
     ImGui::Text("Tempo (BPM):");
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(60);
     ImGui::InputText("##speed", speed_buf, sizeof(speed_buf));
 
-    /* Pattern name display */
-    ImGui::Text("Pattern:");
+    /* Playback controls */
+    ImGui::Separator();
+    if (ImGui::Button("Play Pattern") && !is_playing && !is_song_playing) {
+        play_pattern(nullptr, nullptr, nullptr);
+    }
     ImGui::SameLine();
-    if (ImGui::Button(PatternBuf)) {
-        show_pattern_dialog = true;
+    if (ImGui::Button("Stop Pattern") && is_playing) {
+        stop_playing_pattern(nullptr, nullptr, nullptr);
+    }
+    ImGui::SameLine();
+    
+    if (ImGui::Button("Play Song") && !is_playing && !is_song_playing) {
+        play_song(nullptr, nullptr, nullptr);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Stop Song") && is_song_playing) {
+        stop_playing_song(nullptr, nullptr, nullptr);
     }
 
     /* File operations */
+    ImGui::Separator();
     if (ImGui::Button("Load...")) {
         show_file_dialog = true;
         save_mode = false;
@@ -203,67 +360,11 @@ void RenderMainWindow()
         show_file_dialog = true;
         save_mode = true;
     }
-
-    /* Playback controls */
-    if (ImGui::Button("Play Pattern") && !is_playing && !is_song_playing) {
-        play_pattern(nullptr, nullptr, nullptr);
-    }
     ImGui::SameLine();
-    if (ImGui::Button("Stop Pattern") && is_playing) {
-        stop_playing_pattern(nullptr, nullptr, nullptr);
-    }
-
-    if (ImGui::Button("Play Song") && !is_playing && !is_song_playing) {
-        play_song(nullptr, nullptr, nullptr);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Stop Song") && is_song_playing) {
-        stop_playing_song(nullptr, nullptr, nullptr);
-    }
-
+    
     /* Delay control */
     if (ImGui::Button("Delay...")) {
         show_delay_dialog = true;
-    }
-
-    /* Drum selection buttons */
-    ImGui::Separator();
-    ImGui::Text("Select Drum:");
-    for (int i = 0; i < MAX_DRUMS; i++) {
-        if (i > 0 && i % 4 != 0) ImGui::SameLine();
-        
-        char drum_label[32];
-        if (Pattern[PatternIndex].DrumPattern[i].Drum && 
-            Pattern[PatternIndex].DrumPattern[i].Drum->Name) {
-            snprintf(drum_label, sizeof(drum_label), "%s", 
-                    Pattern[PatternIndex].DrumPattern[i].Drum->Name);
-        } else {
-            snprintf(drum_label, sizeof(drum_label), "Drum %d", i);
-        }
-        
-        if (ImGui::Button(drum_label, ImVec2(100, 0))) {
-            ChangeDrum(nullptr, (XtPointer)i, nullptr);
-        }
-    }
-
-    /* Beat pattern toggles */
-    ImGui::Separator();
-    ImGui::Text("Beat Pattern:");
-    
-    for (int i = 0; i < 16; i++) {
-        if (i > 0) ImGui::SameLine();
-        
-        bool beat_on = Pattern[PatternIndex].DrumPattern[DrumIndex].beat[i] > 0;
-        char beat_label[8];
-        snprintf(beat_label, sizeof(beat_label), "%d", i % 4);
-        
-        if (ImGui::Checkbox(beat_label, &beat_on)) {
-            Pattern[PatternIndex].DrumPattern[DrumIndex].beat[i] = beat_on ? 1 : 0;
-        }
-        
-        if (i == 7) {
-            ImGui::Text(""); // New line after first 8 beats
-        }
     }
 
     /* Song editor */
@@ -288,8 +389,7 @@ void RenderMainWindow()
                 PatternIndex = keycode;
                 PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
                 SetBeats(DrumIndex);
-                PatternBuf[0] = (char)keycode;
-                PatternBuf[1] = '\0';
+                sprintf(PatternBuf, "%s", PatternIndexToString(PatternIndex));
             }
         }
     }
@@ -356,7 +456,7 @@ void RenderPatternDialog()
             char patt_label[16];
             snprintf(patt_label, sizeof(patt_label), "Pattern %c", patt_char);
             if (ImGui::Button(patt_label)) {
-                set_active_pattern(nullptr, (XtPointer)patt, nullptr);
+                set_active_pattern(nullptr, (XtPointer)(intptr_t)patt, nullptr);
             }
             
             /* Show drums and beats for this pattern */
@@ -459,7 +559,7 @@ void UpdateTimers()
 
 void SetBeat(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    int BeatNr = (int)(intptr_t)(client_data);
+    int BeatNr = (int)(intptr_t)client_data;
 
     if (Pattern[PatternIndex].DrumPattern[DrumIndex].beat[BeatNr] > 0) {
         Pattern[PatternIndex].DrumPattern[DrumIndex].beat[BeatNr] = 0;
@@ -475,8 +575,8 @@ void SetBeats(int DrumNr)
 
 void ChangeDrum(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    printf("Change drum to %d\n", (int)(intptr_t)(client_data));
-    int DrumNr = (int)(intptr_t)(client_data);
+    printf("Change drum to %d\n", (int)(intptr_t)client_data);
+    int DrumNr = (int)(intptr_t)client_data;
     
     /* Bounds checking */
     if (DrumNr < 0 || DrumNr >= MAX_DRUMS) {
@@ -674,7 +774,7 @@ void save_file()
 
 void set_active_pattern(Widget w, XtPointer client_data, XtPointer call_data)
 {
-    PatternIndex = (int)(intptr_t)(client_data);
+    PatternIndex = (int)(intptr_t)client_data;
     PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
     SetBeats(DrumIndex);
     PatternBuf[0] = (char)PatternIndex;
@@ -704,12 +804,29 @@ void delay_on(Widget w, XtPointer client_data, XtPointer percent_ptr)
 char *PatternIndexToString(int PI)
 {
     static char str[2];
-    str[0] = (char)PI;
+    if (PI >= 'a' && PI <= 'z') {
+        str[0] = (char)PI;
+    } else if (PI >= 'A' && PI <= 'Z') {
+        str[0] = (char)PI;
+    } else {
+        // For backwards compatibility with X11 keycodes
+        // Assuming lowercase letters were mapped to sequential keycodes
+        if (PI >= 0 && PI < 26) {
+            str[0] = 'a' + PI;
+        } else if (PI >= 26 && PI < 52) {
+            str[0] = 'A' + (PI - 26);
+        } else {
+            str[0] = '?'; // Invalid pattern
+        }
+    }
     str[1] = '\0';
     return str;
 }
 
 int StringToPatternIndex(char *string)
 {
-    return string[0];
+    if (string && string[0]) {
+        return (int)string[0];
+    }
+    return 'a'; // Default to pattern 'a'
 }
