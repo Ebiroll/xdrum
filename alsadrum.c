@@ -32,6 +32,10 @@ static volatile bool pattern_playing = false;
 #define DRUMS_ROOT_DIR  "."
 #endif
 
+
+// globals
+static volatile bool quitting = false;
+
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 #ifdef DEBUG
@@ -82,6 +86,15 @@ typedef struct {
     bool loop;  // Whether to loop the pattern
 } PatternRequest;
 
+
+void reset_voices() {
+    for (int i = 0; i < MAX_VOICE; i++) {
+        voices[i].on = 0;
+        voices[i].pointer = NULL;
+        voices[i].count = 0;
+        voices[i].length = -1;
+    }
+}
 static PatternRequest current_request;
 static volatile bool new_request = false;
 extern int BPM;
@@ -92,7 +105,7 @@ static void* audio_thread_func(void* arg) {
     PatternRequest local_request;
     printf("Audio thread started\n");
     
-    while (!audio_thread_should_stop) {
+    while (!audio_thread_should_stop || quitting) {
         // Wait for a pattern play request
         printf("Audio thread waiting for request...\n");
         pthread_mutex_lock(&audio_mutex);
@@ -204,6 +217,7 @@ void PlayPatternThreaded(int pattern, int measure, bool loop) {
 
 // Stop the currently playing pattern
 void StopPattern(void) {
+    quitting = true;
     pthread_mutex_lock(&audio_mutex);
     pattern_playing = false;
     pthread_mutex_unlock(&audio_mutex);
@@ -233,6 +247,7 @@ int GetCurrentBeat(void) {
 
 
 int StopPlaying(void) {
+   quitting = true;
    return stop_playing();
 }
 void PlayPattern(int Patt, int Measure) {
@@ -438,6 +453,7 @@ static int open_alsa_device(void)
         sample_rate = actual_rate;
     }
 
+   #if 0 
     // Set buffer size (in frames)
     snd_pcm_uframes_t buffer_frames = BUFFER_SIZE * 4 / (num_channels * 2);
     err = snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_frames);
@@ -453,6 +469,12 @@ static int open_alsa_device(void)
         fprintf(stderr, "Cannot set period size: %s\n", snd_strerror(err));
         return -1;
     }
+#endif
+    snd_pcm_uframes_t period_frames = 1024;
+    snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &period_frames, 0);
+
+    snd_pcm_uframes_t buffer_frames = period_frames * 4; // 4 periods
+    snd_pcm_hw_params_set_buffer_size_near(pcm_handle, hw_params, &buffer_frames);
 
     /* Apply hardware parameters */
     err = snd_pcm_hw_params(pcm_handle, hw_params);
@@ -479,6 +501,7 @@ static int open_alsa_device(void)
 /* Close ALSA device */
 void close_alsa_device(void)
 {
+    quitting = true;
     shutdown_audio_thread();
     // Wait for audio thread to finish
     if (audio_thread_running) {
@@ -492,30 +515,31 @@ void close_alsa_device(void)
 }
 
 /* Write audio buffer to ALSA */
-int write_audio_buffer(int length)
+int write_audio_buffer(int length_bytes)
 {
-    snd_pcm_sframes_t frames_written;
-    int frames_to_write = length; 
-    //BUFFER_SIZE / (num_channels * 2); /* 2 bytes per sample */
-    printf("%d secs of audio to write %ld frames\n", frames_to_write / (sample_rate * num_channels), frames_to_write);
-
-    frames_written = snd_pcm_writei(pcm_handle, data, frames_to_write);
-    printf("Wrote %ld frames to ALSA\n", frames_written);
-    
-    if (frames_written < 0) {
-        /* Handle underrun */
-        if (frames_written == -EPIPE) {
-            fprintf(stderr, "ALSA underrun occurred\n");
+    if (!pcm_handle) return 0;
+    if (audio_thread_should_stop) {
+        // avoid fighting with drain/close; pretend success
+        return 0;
+    }
+    int frames_to_write = length_bytes / (num_channels * 2); // 2 bytes/sample
+    int frame_size_bytes = num_channels * 2;
+    unsigned char *ptr = data;
+    while (frames_to_write > 0) {
+        snd_pcm_sframes_t n = snd_pcm_writei(pcm_handle, ptr, frames_to_write);
+        if (n == -EPIPE) {
+            fprintf(stderr, "ALSA underrun\n");
             snd_pcm_prepare(pcm_handle);
-        } else {
-            fprintf(stderr, "Write error: %s\n", snd_strerror(frames_written));
+            continue;
+        } else if (n == -EAGAIN) {
+            continue;
+        } else if (n < 0) {
+            fprintf(stderr, "ALSA write error: %s\n", snd_strerror(n));
             return -1;
         }
-    } else if (frames_written < frames_to_write) {
-        fprintf(stderr, "Short write: wrote %ld of %d frames\n", 
-                frames_written, frames_to_write);
-    } 
-
+        ptr += n * frame_size_bytes;
+        frames_to_write -= n;
+    }
     return 0;
 }
 
@@ -676,87 +700,73 @@ int voice_on(int drum_index)
 }
 
 /* Add one beat worth of audio data */
-int add_one_beat(int length)
+int add_one_beat(int frames)
 {
     int crossed_limit = 0;
 
-    /* Clear temporary buffer */
-    memset(tmpstore, 0, (length + 1) * sizeof(long));
-    printf("Adding one beat of length %d\n", length);
+    // tmpstore holds mono mix in 32-bit to avoid overflow, length = frames
+    memset(tmpstore, 0, frames * sizeof(long));
 
-    /* Mix all active voices */
-    for (int voi = 0; voi < MAX_VOICE; voi++) {
-        if (voices[voi].count > -1) {
-            int sound_length = voices[voi].length - voices[voi].count;
-            if (sound_length > length) {
-                sound_length = length;
+    // Mix voices (length and count are in samples)
+    for (int voi = 0; voi < MAX_VOICE; ++voi) {
+        if (voices[voi].count >= 0) {
+            int sound_len = voices[voi].length - voices[voi].count;
+            if (sound_len <= 0) { voices[voi].count = -1; continue; }
+            int n = (sound_len < frames) ? sound_len : frames;
+
+            short *p = voices[voi].pointer;
+            for (int j = 0; j < n; ++j) {
+                tmpstore[j] += (long)p[j];
             }
 
-            if (sound_length == 0) {
+            voices[voi].pointer += n;
+            voices[voi].count   += n;
+            if (n < frames) {
+                // sample ended this beat
                 voices[voi].count = -1;
-            } else {
-                for (int j = 0; j <= sound_length; j++) {
-                    tmpstore[j] += *voices[voi].pointer;
-                    voices[voi].pointer++;
-                }
-                voices[voi].pointer--;
-
-                if (sound_length == length) {
-                    voices[voi].count += sound_length;
-                } else {
-                    voices[voi].count = -1;
-                }
             }
         }
     }
 
-    /* Apply delay effect if enabled */
+    // Delay tap (optional; keep simple and safe)
     if (delay.On == 1) {
-        int delay_offset = (delay.Delay16thBeats / 16) * length;
-        if (delay_pointer - delay_offset > 0) {
-            delay.pointer = &delay_data[delay_pointer - delay_offset];
+        int delay_offset = (delay.Delay16thBeats * frames) / 16;
+        int dp = delay_pointer - delay_offset;
+        if (dp < 0) dp += MAX_DELAY;
+        short *dptr = &delay_data[dp]; // local pointer for this beat
+
+        for (int j = 0; j < frames; ++j) {
+            tmpstore[j] += (long)((float)dptr[0] * delay.leftc);
+            dptr++;
+            if (dptr >= &delay_data[MAX_DELAY]) dptr = &delay_data[0];
         }
     }
 
-    /* Convert to output format and fill buffer */
-    for (int j = 0; j <= length; j++) {
-        /* Apply delay */
-        if (delay.On == 1) {
-            tmpstore[j] += (long)((float)delay.leftc * (float)(*delay.pointer));
-            delay.pointer++;
-            
-            if (delay.pointer >= &delay_data[MAX_DELAY]) {
-                delay.pointer = &delay_data[0];
-            }
-        }
+    // Convert to 16-bit, write L+R, update delay ring
+    for (int j = 0; j < frames; ++j) {
+        long v = tmpstore[j];
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        short s = (short)v;
 
-        /* Clip and convert to 16-bit */
-        short sample_value;
-        if (tmpstore[j] > 32766) {
-            sample_value = 32767;
-        } else if (tmpstore[j] < -32767) {
-            sample_value = -32768;
-        } else {
-            sample_value = (short)tmpstore[j];
-        }
+        // write stereo: L then R (duplicate mono)
+        data[block_counter + 0] = (unsigned char)(s & 0xFF);
+        data[block_counter + 1] = (unsigned char)((s >> 8) & 0xFF);
+        data[block_counter + 2] = (unsigned char)(s & 0xFF);
+        data[block_counter + 3] = (unsigned char)((s >> 8) & 0xFF);
 
-        /* Store in output buffer (little-endian) */
-        data[block_counter] = (unsigned char)(sample_value & 0xFF);
-        data[block_counter + 1] = (unsigned char)((sample_value >> 8) & 0xFF);
-
-        /* Update delay buffer */
-        delay_data[delay_pointer] = sample_value;
+        // update delay ring with the (mono) sample
+        delay_data[delay_pointer] = s;
         delay_pointer = (delay_pointer + 1) % MAX_DELAY;
 
-        left_of_block -= 2;
-        block_counter += 2;
+        block_counter += 4;    // 4 bytes per frame (stereo 16-bit)
+        left_of_block -= 4;
 
-        /* Write buffer if full */
-        if (left_of_block < 1) {
+        if (left_of_block < 4) {
             crossed_limit = 1;
-            write_audio_buffer(block_counter);
-            left_of_block = BUFFER_SIZE;
+            write_audio_buffer(block_counter);  // bytes
             block_counter = 0;
+            left_of_block = BUFFER_SIZE;
         }
     }
 
@@ -805,6 +815,8 @@ int MAIN(int argc, char *argv[])
         close_alsa_device();
         return -1;
     }
+
+    reset_voices();
 
     // Your ImGui main loop would go here
     // Example usage:
