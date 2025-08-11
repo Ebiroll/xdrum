@@ -545,10 +545,75 @@ void RenderWaveformWindow()
                 ImGui::Text("Pan: %d", drum->pan);
                 ImGui::Text("Volume: %d", drum->vol);
                 
+                // Find the actual content bounds (skip silence at the end)
+                int effective_end = drum->length;
+                int effective_start = 0;
+                float threshold = 0.001f; // Silence threshold
+                
+                // Find where the sample effectively ends (skip trailing silence)
+                for (int i = drum->length - 1; i >= drum->length * 0.1f; i--) {
+                    float val = fabs((float)drum->sample[i] / 32768.0f);
+                    if (val > threshold) {
+                        effective_end = i + (drum->length / 100); // Add small padding
+                        if (effective_end > drum->length) effective_end = drum->length;
+                        break;
+                    }
+                }
+                
+                // Find where the sample effectively starts (skip leading silence)
+                for (int i = 0; i < drum->length * 0.1f; i++) {
+                    float val = fabs((float)drum->sample[i] / 32768.0f);
+                    if (val > threshold) {
+                        effective_start = i - 100; // Small padding before
+                        if (effective_start < 0) effective_start = 0;
+                        break;
+                    }
+                }
+                
+                // Zoom controls
+                static float zoom_start = 0.0f;
+                static float zoom_end = 1.0f;
+                static bool auto_fit = true;
+                
+                ImGui::Checkbox("Auto-fit waveform", &auto_fit);
+                
+                if (auto_fit) {
+                    zoom_start = (float)effective_start / drum->length;
+                    zoom_end = (float)effective_end / drum->length;
+                    if (zoom_end - zoom_start < 0.05f) { // Minimum zoom range
+                        zoom_end = zoom_start + 0.05f;
+                        if (zoom_end > 1.0f) {
+                            zoom_end = 1.0f;
+                            zoom_start = 0.95f;
+                        }
+                    }
+                } else {
+                    ImGui::Text("Manual Zoom:");
+                    if (ImGui::SliderFloat("Start", &zoom_start, 0.0f, zoom_end - 0.01f, "%.3f")) {
+                        if (zoom_start >= zoom_end) zoom_start = zoom_end - 0.01f;
+                    }
+                    if (ImGui::SliderFloat("End", &zoom_end, zoom_start + 0.01f, 1.0f, "%.3f")) {
+                        if (zoom_end <= zoom_start) zoom_end = zoom_start + 0.01f;
+                    }
+                    if (ImGui::Button("Reset Zoom")) {
+                        zoom_start = 0.0f;
+                        zoom_end = 1.0f;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Fit to Content")) {
+                        auto_fit = true;
+                    }
+                }
+                
+                // Calculate the displayed range
+                int display_start = (int)(zoom_start * drum->length);
+                int display_end = (int)(zoom_end * drum->length);
+                int display_length = display_end - display_start;
+                
                 // Waveform visualization with actual data
                 ImDrawList* draw_list = ImGui::GetWindowDrawList();
                 ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-                ImVec2 canvas_size = ImVec2(600, 150);
+                ImVec2 canvas_size = ImVec2(ImGui::GetContentRegionAvail().x - 10, 200); // Use available width
                 
                 // Background
                 draw_list->AddRectFilled(canvas_pos, 
@@ -574,31 +639,41 @@ void RenderWaveformWindow()
                                       IM_COL32(64, 64, 64, 64));
                 }
                 
-                // Calculate downsampling ratio - we want to display the entire sample
-                int samples_per_pixel = drum->length / (int)canvas_size.x;
+                // Vertical grid lines (time markers)
+                int num_time_lines = 8;
+                for (int i = 1; i < num_time_lines; i++) {
+                    float x = canvas_pos.x + (canvas_size.x * i) / num_time_lines;
+                    draw_list->AddLine(ImVec2(x, canvas_pos.y), 
+                                      ImVec2(x, canvas_pos.y + canvas_size.y), 
+                                      IM_COL32(64, 64, 64, 64));
+                }
+                
+                // Calculate downsampling ratio for the zoomed range
+                int samples_per_pixel = display_length / (int)canvas_size.x;
                 if (samples_per_pixel < 1) samples_per_pixel = 1;
                 
                 // Window size for sliding average (adjust for smoothness)
                 int window_size = samples_per_pixel;
-                if (window_size < 4) window_size = 4;
+                if (window_size < 2) window_size = 2;
                 if (window_size > 100) window_size = 100;
-                
-                // Draw waveform with sliding average
-                float prev_x = canvas_pos.x;
-                float prev_y = center_y;
                 
                 // Track min/max for better visualization
                 float global_max = 0.0f;
-                for (int i = 0; i < drum->length; i++) {
-                    float val = (float)drum->sample[i] / 32768.0f;
-                    if (fabs(val) > global_max) global_max = fabs(val);
+                for (int i = display_start; i < display_end && i < drum->length; i++) {
+                    float val = fabs((float)drum->sample[i] / 32768.0f);
+                    if (val > global_max) global_max = val;
                 }
                 if (global_max < 0.1f) global_max = 0.1f; // Prevent division by zero
                 
+                // Draw waveform
+                float prev_x = canvas_pos.x;
+                float prev_y = center_y;
+                
                 for (int x = 0; x < canvas_size.x; x++) {
-                    int sample_start = (x * drum->length) / canvas_size.x;
-                    int sample_end = sample_start + window_size;
-                    if (sample_end > drum->length) sample_end = drum->length;
+                    int sample_idx = display_start + (x * display_length) / canvas_size.x;
+                    int sample_end_idx = sample_idx + window_size;
+                    if (sample_end_idx > display_end) sample_end_idx = display_end;
+                    if (sample_end_idx > drum->length) sample_end_idx = drum->length;
                     
                     // Calculate min/max for this window (for better peak visibility)
                     float min_val = 0.0f;
@@ -606,7 +681,7 @@ void RenderWaveformWindow()
                     float avg_val = 0.0f;
                     int count = 0;
                     
-                    for (int i = sample_start; i < sample_end && i < drum->length; i++) {
+                    for (int i = sample_idx; i < sample_end_idx && i < drum->length; i++) {
                         // Convert 16-bit signed sample to float (-1.0 to 1.0)
                         float val = (float)drum->sample[i] / 32768.0f;
                         
@@ -620,10 +695,18 @@ void RenderWaveformWindow()
                         avg_val /= count;
                     }
                     
-                    // Use the value with maximum absolute amplitude for better visibility
-                    float display_val = (fabs(max_val) > fabs(min_val)) ? max_val : min_val;
-                    if (fabs(avg_val) > fabs(display_val) * 0.7f) {
-                        display_val = avg_val; // Use average if it's close to the peak
+                    // Use appropriate value based on zoom level
+                    float display_val;
+                    if (samples_per_pixel > 50) {
+                        // Very zoomed out - show envelope
+                        display_val = (fabs(max_val) > fabs(min_val)) ? max_val : min_val;
+                    } else if (samples_per_pixel > 10) {
+                        // Medium zoom - blend peak and average
+                        float peak = (fabs(max_val) > fabs(min_val)) ? max_val : min_val;
+                        display_val = peak * 0.7f + avg_val * 0.3f;
+                    } else {
+                        // Zoomed in - show actual samples
+                        display_val = avg_val;
                     }
                     
                     // Normalize and scale
@@ -640,8 +723,8 @@ void RenderWaveformWindow()
                                          IM_COL32(0, 255, 0, 255), 1.5f);
                     }
                     
-                    // Optional: Draw min/max envelope for dense samples
-                    if (samples_per_pixel > 10 && min_val != max_val) {
+                    // Draw min/max envelope for dense samples
+                    if (samples_per_pixel > 5 && min_val != max_val) {
                         float min_y = center_y - (min_val / global_max * canvas_size.y * 0.45f);
                         float max_y = center_y - (max_val / global_max * canvas_size.y * 0.45f);
                         draw_list->AddLine(ImVec2(curr_x, min_y), 
@@ -655,17 +738,25 @@ void RenderWaveformWindow()
                 
                 ImGui::Dummy(canvas_size);
                 
-                // Playback position indicator (if drum is playing)
-                ImGui::Text("Length: %.2f seconds", (float)drum->length / 44100.0f); // Assuming 44.1kHz
+                // Display info about the visible range
+                float visible_start_time = (float)display_start / 44100.0f;
+                float visible_end_time = (float)display_end / 44100.0f;
+                ImGui::Text("Visible range: %.3f - %.3f seconds (%.1f%% of sample)", 
+                           visible_start_time, visible_end_time, (zoom_end - zoom_start) * 100.0f);
+                ImGui::Text("Total length: %.3f seconds", (float)drum->length / 44100.0f);
                 
-                // Simple amplitude analysis
+                // Simple amplitude analysis for the visible range
                 float rms = 0.0f;
-                for (int i = 0; i < drum->length; i++) {
+                int analysis_count = 0;
+                for (int i = display_start; i < display_end && i < drum->length; i++) {
                     float val = (float)drum->sample[i] / 32768.0f;
                     rms += val * val;
+                    analysis_count++;
                 }
-                rms = sqrt(rms / drum->length);
-                ImGui::Text("RMS Level: %.3f (%.1f dB)", rms, 20.0f * log10(rms));
+                if (analysis_count > 0) {
+                    rms = sqrt(rms / analysis_count);
+                    ImGui::Text("Visible RMS Level: %.3f (%.1f dB)", rms, 20.0f * log10(rms + 0.00001f));
+                }
                 
             } else {
                 ImGui::Text("Sample data not available");
