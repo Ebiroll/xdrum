@@ -160,6 +160,9 @@ int main(int argc, char **argv)
         /* Render UI */
         RenderMainWindow();
         
+        // Render the drum context menu if needed
+        RenderDrumContextMenu();
+        
         if (show_file_dialog)
             RenderFileDialog();
         
@@ -168,9 +171,6 @@ int main(int argc, char **argv)
             
         if (show_delay_dialog)
             RenderDelayDialog();
-            
-        if (show_drum_context_menu)
-            RenderDrumContextMenu();
             
         if (show_waveform_window)
             RenderWaveformWindow();
@@ -212,19 +212,15 @@ void HandleKeyboardInput()
     for (int i = 0; i < 26; i++) {
         ImGuiKey key = (ImGuiKey)(ImGuiKey_A + i);
         if (ImGui::IsKeyPressed(key)) {
-            char pattern_char;
+            char pattern_char = 'a' + i;  // Always use lowercase for patterns
             
             if (io.KeyShift) {
-                // Shift+letter = uppercase pattern
-                pattern_char = 'A' + i;
-                // Copy current pattern to new pattern
+                // Shift+letter = copy current pattern to that letter, then switch to it
                 CopyBeat(PatternIndex, pattern_char);
-            } else {
-                // letter = lowercase pattern
-                pattern_char = 'a' + i;
+                printf("Copied pattern %c to pattern %c\n", (char)PatternIndex, pattern_char);
             }
             
-            // Switch to the pattern
+            // Switch to the pattern (always lowercase)
             PatternIndex = pattern_char;
             PattP = &Pattern[PatternIndex].DrumPattern[DrumIndex];
             SetBeats(DrumIndex);
@@ -283,7 +279,7 @@ void RenderMainWindow()
         
         any_drum_shown = true;
 
-        // FIX: Push a unique ID for this drum row to prevent ID conflicts.
+        // Push a unique ID for this drum row to prevent ID conflicts
         ImGui::PushID(drum_idx);
         
         // Drum name button with right-click context menu
@@ -295,14 +291,26 @@ void RenderMainWindow()
         snprintf(button_label, sizeof(button_label), "%s##drum%d", drum_name, drum_idx);
         
         if (ImGui::Button(button_label, ImVec2(80, 0))) {
-            ChangeDrum(nullptr, (XtPointer)(intptr_t)drum_idx, nullptr);
+            // Check if Shift is held for context menu
+            if (ImGui::GetIO().KeyShift) {
+                context_menu_drum_idx = drum_idx;
+                show_drum_context_menu = true;
+                printf("Opening context menu for drum %d\n", drum_idx);
+            } else {
+                ChangeDrum(nullptr, (XtPointer)(intptr_t)drum_idx, nullptr);
+            }
         }
         
-        // Right-click context menu
+        // Right-click context menu (backup method)
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
             context_menu_drum_idx = drum_idx;
             show_drum_context_menu = true;
-            ImGui::OpenPopup("DrumContextMenu");
+            printf("Right-click context menu for drum %d\n", drum_idx);
+        }
+        
+        // Tooltip to show Shift+click hint
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Click to select, Shift+Click for options");
         }
         
         if (is_selected) {
@@ -311,16 +319,9 @@ void RenderMainWindow()
         
         ImGui::SameLine();
         
-        // Beat toggles for this drum
+        // Beat toggles for this drum - ALL ON ONE LINE
         for (int i = 0; i < 16; i++) {
-            if (i == 8) {
-                // New line for beats 8-15 - indent with an invisible dummy widget.
-                ImGui::Dummy(ImVec2(88.0f, 0.0f));
-                ImGui::SameLine();
-            }
-            
             bool beat_on = Pattern[PatternIndex].DrumPattern[drum_idx].beat[i] > 0;
-            // The ID is now scoped by PushID, but a specific label is still good practice.
             char beat_id[32];
             snprintf(beat_id, sizeof(beat_id), "##beat%d", i);
             
@@ -337,32 +338,27 @@ void RenderMainWindow()
                 ImGui::PopStyleColor();
             }
             
-            if (i < 15 && i != 7) ImGui::SameLine();
+            // Keep everything on the same line
+            if (i < 15) ImGui::SameLine();
         }
         
         // Beat numbers guide (only show for selected drum)
         if (drum_idx == DrumIndex) {
-            // Indent the first row of numbers to align with the checkboxes.
+            // Indent to align with the checkboxes
             ImGui::Dummy(ImVec2(88.0f, 0.0f));
             ImGui::SameLine();
             
             for (int i = 0; i < 16; i++) {
-                // FIX: Correctly indent the second row of numbers without a faulty NewLine.
-                if (i == 8) {
-                    // We are on a new line, just indent and continue.
-                    ImGui::Dummy(ImVec2(88.0f, 0.0f));
-                    ImGui::SameLine();
-                }
+                // Center the number under the checkbox
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 7);  // Offset to center number
                 ImGui::Text("%d", i % 4);
-                if (i < 15 && i != 7) {
-                    ImGui::SameLine();
-                    ImGui::Dummy(ImVec2(14, 0)); // Spacing to align with checkboxes
+                if (i < 15) {
                     ImGui::SameLine();
                 }
             }
         }
         
-        // FIX: Pop the ID for this drum row.
+        // Pop the ID for this drum row
         ImGui::PopID();
     }
     
@@ -395,14 +391,21 @@ void RenderMainWindow()
         // Push ID here as well, since buttons may have the same name in different patterns
         ImGui::PushID(i);
         if (ImGui::Button(drum_name, ImVec2(100, 0))) {
-            ChangeDrum(nullptr, (XtPointer)(intptr_t)i, nullptr);
+            // Check if Shift is held for context menu
+            if (ImGui::GetIO().KeyShift) {
+                context_menu_drum_idx = i;
+                show_drum_context_menu = true;
+                printf("Opening context menu for drum %d\n", i);
+            } else {
+                ChangeDrum(nullptr, (XtPointer)(intptr_t)i, nullptr);
+            }
         }
         
-        // Right-click context menu
+        // Right-click context menu (backup method)
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
             context_menu_drum_idx = i;
             show_drum_context_menu = true;
-            ImGui::OpenPopup("DrumContextMenu");
+            printf("Right-click context menu for drum %d\n", i);
         }
         ImGui::PopID();
         
@@ -466,7 +469,12 @@ void RenderMainWindow()
 
 void RenderDrumContextMenu()
 {
-    if (ImGui::BeginPopup("DrumContextMenu")) {
+    if (show_drum_context_menu) {
+        ImGui::OpenPopup("DrumContextMenu");
+        show_drum_context_menu = false;  // Reset flag after opening
+    }
+    
+    if (ImGui::BeginPopupModal("DrumContextMenu", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
         if (context_menu_drum_idx >= 0 && context_menu_drum_idx < MAX_DRUMS) {
             tDrum* drum = Pattern[PatternIndex].DrumPattern[context_menu_drum_idx].Drum;
             
@@ -484,15 +492,17 @@ void RenderDrumContextMenu()
                 ImGui::Separator();
                 
                 // Show waveform
-                if (ImGui::MenuItem("Show Waveform")) {
+                if (ImGui::Button("Show Waveform")) {
                     waveform_drum_idx = context_menu_drum_idx;
                     show_waveform_window = true;
+                    ImGui::CloseCurrentPopup();
                 }
                 
                 // Load new sample
-                if (ImGui::MenuItem("Load Sample...")) {
+                if (ImGui::Button("Load Sample...")) {
                     // Could trigger a file dialog for loading new samples
                     printf("Load sample for drum %d\n", context_menu_drum_idx);
+                    ImGui::CloseCurrentPopup();
                 }
                 
                 ImGui::Separator();
@@ -501,16 +511,16 @@ void RenderDrumContextMenu()
                 ImGui::Text("Volume:");
                 static float volume = 1.0f;
                 ImGui::SliderFloat("##volume", &volume, 0.0f, 2.0f, "%.2f");
+                
+                ImGui::Separator();
+                
+                if (ImGui::Button("Close")) {
+                    ImGui::CloseCurrentPopup();
+                }
             }
         }
         
-        if (!ImGui::IsPopupOpen("DrumContextMenu")) {
-            show_drum_context_menu = false;
-        }
-        
         ImGui::EndPopup();
-    } else {
-        show_drum_context_menu = false;
     }
 }
 
@@ -638,7 +648,7 @@ void RenderPatternDialog()
                 ImGui::PopStyleColor();
             }
             
-            /* Show drums and beats for this pattern - EDITABLE */
+            /* Show drums and beats for this pattern - EDITABLE, ALL ON ONE LINE */
             for (int drum = 0; drum < MAX_DRUMS; drum++) {
                 if (Pattern[patt].DrumPattern[drum].Drum == NULL) continue;
                 
@@ -658,7 +668,7 @@ void RenderPatternDialog()
                 ImGui::Text("  %s:", drum_name);
                 ImGui::SameLine();
                 
-                // Editable beat toggles
+                // Editable beat toggles - ALL ON ONE LINE
                 for (int beat = 0; beat < 16; beat++) {
                     bool beat_on = Pattern[patt].DrumPattern[drum].beat[beat] > 0;
                     char beat_id[32];
@@ -677,12 +687,9 @@ void RenderPatternDialog()
                         ImGui::PopStyleColor();
                     }
                     
-                    if (beat == 7) {
-                      // Start new line for beats 8-15
-                      ImGui::Dummy(ImVec2(90, 0)); // invisible indent
-                      ImGui::SameLine();                    
-                    } else if (beat < 15) {
-                      ImGui::SameLine();
+                    // Keep all beats on same line
+                    if (beat < 15) {
+                        ImGui::SameLine();
                     }
                 }
             }
