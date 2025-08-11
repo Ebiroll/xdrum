@@ -539,30 +539,159 @@ void RenderWaveformWindow()
             ImGui::Text("Filename: %s", drum->Filename ? drum->Filename : "None");
             ImGui::Text("Loaded: %s", drum->Loaded ? "Yes" : "No");
             
-            // Simple waveform visualization placeholder
-            ImDrawList* draw_list = ImGui::GetWindowDrawList();
-            ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
-            ImVec2 canvas_size = ImVec2(400, 100);
-            
-            draw_list->AddRectFilled(canvas_pos, 
-                                   ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
-                                   IM_COL32(50, 50, 50, 255));
-            
-            draw_list->AddRect(canvas_pos, 
-                             ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
-                             IM_COL32(255, 255, 255, 255));
-            
-            // Draw a simple sine wave as placeholder
-            for (int i = 0; i < canvas_size.x - 1; i++) {
-                float x1 = canvas_pos.x + i;
-                float x2 = canvas_pos.x + i + 1;
-                float y1 = canvas_pos.y + canvas_size.y / 2 + sin(i * 0.1f) * 30;
-                float y2 = canvas_pos.y + canvas_size.y / 2 + sin((i + 1) * 0.1f) * 30;
+            // Get the actual sample data if loaded
+            if (drum->Loaded && drum->sample != NULL && drum->length > 0) {
+                ImGui::Text("Sample Length: %d samples", drum->length);
+                ImGui::Text("Pan: %d", drum->pan);
+                ImGui::Text("Volume: %d", drum->vol);
                 
-                draw_list->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), IM_COL32(0, 255, 0, 255));
+                // Waveform visualization with actual data
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+                ImVec2 canvas_size = ImVec2(600, 150);
+                
+                // Background
+                draw_list->AddRectFilled(canvas_pos, 
+                                       ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                                       IM_COL32(30, 30, 30, 255));
+                
+                // Border
+                draw_list->AddRect(canvas_pos, 
+                                 ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                                 IM_COL32(255, 255, 255, 255));
+                
+                // Center line
+                float center_y = canvas_pos.y + canvas_size.y / 2;
+                draw_list->AddLine(ImVec2(canvas_pos.x, center_y), 
+                                  ImVec2(canvas_pos.x + canvas_size.x, center_y), 
+                                  IM_COL32(128, 128, 128, 128));
+                
+                // Grid lines for better visualization
+                for (int i = 1; i < 4; i++) {
+                    float y = canvas_pos.y + (canvas_size.y * i) / 4;
+                    draw_list->AddLine(ImVec2(canvas_pos.x, y), 
+                                      ImVec2(canvas_pos.x + canvas_size.x, y), 
+                                      IM_COL32(64, 64, 64, 64));
+                }
+                
+                // Calculate downsampling ratio - we want to display the entire sample
+                int samples_per_pixel = drum->length / (int)canvas_size.x;
+                if (samples_per_pixel < 1) samples_per_pixel = 1;
+                
+                // Window size for sliding average (adjust for smoothness)
+                int window_size = samples_per_pixel;
+                if (window_size < 4) window_size = 4;
+                if (window_size > 100) window_size = 100;
+                
+                // Draw waveform with sliding average
+                float prev_x = canvas_pos.x;
+                float prev_y = center_y;
+                
+                // Track min/max for better visualization
+                float global_max = 0.0f;
+                for (int i = 0; i < drum->length; i++) {
+                    float val = (float)drum->sample[i] / 32768.0f;
+                    if (fabs(val) > global_max) global_max = fabs(val);
+                }
+                if (global_max < 0.1f) global_max = 0.1f; // Prevent division by zero
+                
+                for (int x = 0; x < canvas_size.x; x++) {
+                    int sample_start = (x * drum->length) / canvas_size.x;
+                    int sample_end = sample_start + window_size;
+                    if (sample_end > drum->length) sample_end = drum->length;
+                    
+                    // Calculate min/max for this window (for better peak visibility)
+                    float min_val = 0.0f;
+                    float max_val = 0.0f;
+                    float avg_val = 0.0f;
+                    int count = 0;
+                    
+                    for (int i = sample_start; i < sample_end && i < drum->length; i++) {
+                        // Convert 16-bit signed sample to float (-1.0 to 1.0)
+                        float val = (float)drum->sample[i] / 32768.0f;
+                        
+                        avg_val += val;
+                        if (val < min_val) min_val = val;
+                        if (val > max_val) max_val = val;
+                        count++;
+                    }
+                    
+                    if (count > 0) {
+                        avg_val /= count;
+                    }
+                    
+                    // Use the value with maximum absolute amplitude for better visibility
+                    float display_val = (fabs(max_val) > fabs(min_val)) ? max_val : min_val;
+                    if (fabs(avg_val) > fabs(display_val) * 0.7f) {
+                        display_val = avg_val; // Use average if it's close to the peak
+                    }
+                    
+                    // Normalize and scale
+                    display_val = display_val / global_max;
+                    
+                    // Scale and position
+                    float curr_x = canvas_pos.x + x;
+                    float curr_y = center_y - (display_val * canvas_size.y * 0.45f); // Scale to 90% of height
+                    
+                    // Draw line from previous point
+                    if (x > 0) {
+                        draw_list->AddLine(ImVec2(prev_x, prev_y), 
+                                         ImVec2(curr_x, curr_y), 
+                                         IM_COL32(0, 255, 0, 255), 1.5f);
+                    }
+                    
+                    // Optional: Draw min/max envelope for dense samples
+                    if (samples_per_pixel > 10 && min_val != max_val) {
+                        float min_y = center_y - (min_val / global_max * canvas_size.y * 0.45f);
+                        float max_y = center_y - (max_val / global_max * canvas_size.y * 0.45f);
+                        draw_list->AddLine(ImVec2(curr_x, min_y), 
+                                         ImVec2(curr_x, max_y), 
+                                         IM_COL32(0, 128, 0, 128), 0.5f);
+                    }
+                    
+                    prev_x = curr_x;
+                    prev_y = curr_y;
+                }
+                
+                ImGui::Dummy(canvas_size);
+                
+                // Playback position indicator (if drum is playing)
+                ImGui::Text("Length: %.2f seconds", (float)drum->length / 44100.0f); // Assuming 44.1kHz
+                
+                // Simple amplitude analysis
+                float rms = 0.0f;
+                for (int i = 0; i < drum->length; i++) {
+                    float val = (float)drum->sample[i] / 32768.0f;
+                    rms += val * val;
+                }
+                rms = sqrt(rms / drum->length);
+                ImGui::Text("RMS Level: %.3f (%.1f dB)", rms, 20.0f * log10(rms));
+                
+            } else {
+                ImGui::Text("Sample data not available");
+                
+                // Fallback visualization
+                ImDrawList* draw_list = ImGui::GetWindowDrawList();
+                ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+                ImVec2 canvas_size = ImVec2(400, 100);
+                
+                draw_list->AddRectFilled(canvas_pos, 
+                                       ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                                       IM_COL32(50, 50, 50, 255));
+                
+                draw_list->AddRect(canvas_pos, 
+                                 ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), 
+                                 IM_COL32(255, 255, 255, 255));
+                
+                // Center line
+                float center_y = canvas_pos.y + canvas_size.y / 2;
+                draw_list->AddLine(ImVec2(canvas_pos.x, center_y), 
+                                  ImVec2(canvas_pos.x + canvas_size.x, center_y), 
+                                  IM_COL32(128, 128, 128, 255));
+                
+                ImGui::Dummy(canvas_size);
+                ImGui::Text("No waveform data to display");
             }
-            
-            ImGui::Dummy(canvas_size);
         }
     }
     
