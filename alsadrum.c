@@ -134,19 +134,19 @@ static void* audio_thread_func(void* arg) {
         
         // Play the pattern
         do {
-            // Do two for test
+            local_request = current_request;
             M=0;
             local_request.measure = 0;
             printf("Playing pattern %d, measure %d, loop: %d\n",
                    local_request.pattern, local_request.measure, local_request.loop);
             play_pattern(local_request.pattern, local_request.measure);
-            play_pattern(local_request.pattern, local_request.measure);
+            
             
             // Check if we should stop
             printf("Checking if we should continue playing...\n");
             pthread_mutex_lock(&audio_mutex);
-            //bool should_continue = local_request.loop && pattern_playing && !audio_thread_should_stop;
-            bool should_continue = false; // For testing, always stop after one play
+            bool should_continue = local_request.loop && pattern_playing && !audio_thread_should_stop;
+            //bool should_continue = false; // For testing, always stop after one play
             pthread_mutex_unlock(&audio_mutex);
             if (!should_continue) {
                 printf("Stopping pattern playback\n");
@@ -207,6 +207,7 @@ void shutdown_audio_thread(void) {
 
 // Thread-safe version of PlayPattern
 void PlayPatternThreaded(int pattern, int measure, bool loop) {
+    memset(delay_data, 0, MAX_DELAY * sizeof(short));
     //printf("Requesting to play pattern %d, measure %d, loop: %d\n", pattern, measure, loop);
     pthread_mutex_lock(&audio_mutex);
     //printf("Lock acquired, setting request...\n");
@@ -290,8 +291,8 @@ static void play_pattern(int patt, int measure)
     // 44100 samples per second * 60 seconds per minute / BPM is 
     // 1 beat = 44100 / 4 = 11025 samples
     double tpb = (double)(1500 / (double)BPM); // Ticks per Beat
-    double tum = (double)measure * (24000 / (double)BPM); // Ticks per Measure
-    sample_len = 44100 *num_channels  *60 / BPM;
+    double tum = (double)measure * (24000 / (double)BPM); // Ticks until Measure
+    sample_len = sample_rate  * 60 / BPM;
 
     for (int i = beat; i < 16; i++) {
         /* Trigger drums for this beat */
@@ -334,7 +335,7 @@ int stop_playing(void)
 
     /* Process remaining audio from active voices */
     for (int voi = 0; voi < MAX_VOICE; voi++) {
-        if (voices[voi].count > -1) {
+        if ((voices[voi].count> -1) && voices[voi].on) {
             for (int j = 0; j <= BUFFER_SIZE; j++) {
                 if (voices[voi].count > voices[voi].length) {
                     if (j > max_j) {
@@ -399,7 +400,7 @@ int stop_playing(void)
 
 
 unsigned long GetUpdateIntervall(int PattI)  {
-  return (unsigned long)(1000 * 240 / BPM);
+  return (unsigned long)(800 * 60 / BPM);
 }
 
 
@@ -479,7 +480,7 @@ static int open_alsa_device(void)
         return -1;
     }
 #endif
-    snd_pcm_uframes_t period_frames = 1024;
+    snd_pcm_uframes_t period_frames = 1024 * 4;
     snd_pcm_hw_params_set_period_size_near(pcm_handle, hw_params, &period_frames, 0);
 
     snd_pcm_uframes_t buffer_frames = period_frames * 4; // 4 periods
@@ -700,6 +701,22 @@ static void parse_drums(const char *filename)
     fclose(drum_fd);
 }
 
+void validate_delay_params(void)
+{
+    // Ensure delay time is reasonable
+    int max_delay_16ths = (MAX_DELAY * BPM * 4) / (sample_rate * 60);
+    if (delay.Delay16thBeats > max_delay_16ths) {
+        delay.Delay16thBeats = max_delay_16ths;
+        printf("Warning: Delay time clamped to %d 16th beats\n", max_delay_16ths);
+    }
+    
+    // Ensure feedback is in valid range (0.0 to 0.95 to avoid runaway feedback)
+    if (delay.leftc < 0.0) delay.leftc = 0.0;
+    if (delay.leftc > 0.95) delay.leftc = 0.95;
+    if (delay.rightc < 0.0) delay.rightc = 0.0;
+    if (delay.rightc > 0.95) delay.rightc = 0.95;
+}
+
 /* Start playing a voice */
 int voice_on(int drum_index)
 {
@@ -736,85 +753,112 @@ int add_one_beat(int frames)
 {
     int crossed_limit = 0;
 
-    // tmpstore holds mono mix in 32-bit to avoid overflow, length = frames
+    // Clear temporary buffers
     memset(tmpstorel, 0, frames * sizeof(long));
     memset(tmpstorer, 0, frames * sizeof(long));
 
-
-    // Mix voices (length and count are in samples)
+    // Mix voices (this part is fine)
     for (int voi = 0; voi < MAX_VOICE; ++voi) {
         if (voices[voi].count >= 0) {
             int sound_len = voices[voi].length - voices[voi].count;
-            if (sound_len <= 0) { voices[voi].count = -1; continue; }
+            if (sound_len <= 0) { 
+                voices[voi].count = -1; 
+                continue; 
+            }
             int n = (sound_len < frames) ? sound_len : frames;
 
             short *p = voices[voi].pointer;
             for (int j = 0; j < n; ++j) {
-                tmpstorel[j] += (long)p[j]* voices[voi].pan / 127.0; // Apply panning
-                tmpstorer[j] += (long)p[j] * (1.0 - voices[voi].pan / 127.0); // Right channel
+                tmpstorel[j] += (long)(p[j] * voices[voi].pan / 127.0);
+                tmpstorer[j] += (long)(p[j] * (1.0 - voices[voi].pan / 127.0));
             }
 
             voices[voi].pointer += n;
-            voices[voi].count   += n;
+            voices[voi].count += n;
             if (n < frames) {
-                // sample ended this beat
                 voices[voi].count = -1;
             }
         }
     }
 
-    // Delay tap (optional; keep simple and safe)
+    // FIXED DELAY IMPLEMENTATION
     if (delay.On == 1) {
-        printf("Adding delay effect\n");
-        int delay_offset = (delay.Delay16thBeats * frames) / 16;
-        int dp = delay_pointer - delay_offset;
-        if (dp < 0) dp += MAX_DELAY;
-        short *dptr = &delay_data[dp]; // local pointer for this beat
+        // Calculate delay in samples
+        int samples_per_16th = (sample_rate * 60) / (BPM * 4);
+        int delay_samples = delay.Delay16thBeats * samples_per_16th;
+        
+        // Ensure delay doesn't exceed buffer size
+        if (delay_samples >= MAX_DELAY) {
+            delay_samples = MAX_DELAY - 1;
+        }
 
+        // Apply delay effect sample by sample
         for (int j = 0; j < frames; ++j) {
-            tmpstorel[j] += (long)((float)dptr[0] * delay.leftc);
-            tmpstorer[j] += (long)((float)dptr[0] * delay.rightc);
-            dptr++;
-            if (dptr >= &delay_data[MAX_DELAY]) dptr = &delay_data[0];
+            // Calculate read position for THIS specific sample
+            // BUG FIX: We need to advance the read position for each sample!
+            int read_pos = (delay_pointer + j - delay_samples) % MAX_DELAY;
+            if (read_pos < 0) {
+                read_pos += MAX_DELAY;
+            }
+            
+            // Add delayed signal to current signal
+            long delayed_sample = (long)delay_data[read_pos];
+            tmpstorel[j] += (long)(delayed_sample * delay.leftc);
+            tmpstorer[j] += (long)(delayed_sample * delay.rightc);
+            
+            // NOTE: read_pos automatically advances because we use (delay_pointer + j)
         }
     }
 
-    // Convert to 16-bit, write L+R, update delay ring
+    // Convert to 16-bit and write output
+    // This is where we also update the delay buffer
+    int local_delay_pointer = delay_pointer;  // Use local copy for efficiency
+    
     for (int j = 0; j < frames; ++j) {
+        // Clip left channel
         long v = tmpstorel[j];
-        if (v >  32767) v =  32767;
+        if (v > 32767) v = 32767;
         if (v < -32768) v = -32768;
         short l = (short)v;
+        
+        // Clip right channel
         v = tmpstorer[j];
-        if (v >  32767) v =  32767;
+        if (v > 32767) v = 32767;
         if (v < -32768) v = -32768;
         short r = (short)v;
 
-        // write stereo: L then R (duplicate mono)
-
+        // Write stereo output
         data[block_counter + 0] = (unsigned char)(l & 0xFF);
         data[block_counter + 1] = (unsigned char)((l >> 8) & 0xFF);
         data[block_counter + 2] = (unsigned char)(r & 0xFF);
         data[block_counter + 3] = (unsigned char)((r >> 8) & 0xFF);
+        
+        // Store the WET signal (after delay) in the delay buffer
+        // This creates the feedback loop
+        if (delay.On == 1) {
+            // Store mono mix of current output (WITH delay) in delay buffer
+            delay_data[local_delay_pointer] = (l + r) / 2;
+            local_delay_pointer = (local_delay_pointer + 1) % MAX_DELAY;
+        }
 
-        // update delay ring with the (mono) sample
-        delay_data[delay_pointer] = l;
-        delay_pointer = (delay_pointer + 1) % MAX_DELAY;
-
-        block_counter += 4;    // 4 bytes per frame (stereo 16-bit)
+        block_counter += 4;
         left_of_block -= 4;
 
         if (left_of_block < 4) {
             crossed_limit = 1;
-            write_audio_buffer(block_counter);  // bytes
+            write_audio_buffer(block_counter);
             block_counter = 0;
             left_of_block = BUFFER_SIZE;
         }
     }
+    
+    // Update the global delay pointer
+    if (delay.On == 1) {
+        delay_pointer = local_delay_pointer;
+    }
 
     return crossed_limit;
 }
-
 // Implementation:
 int init_audio_system(void) 
 {
@@ -838,9 +882,9 @@ int MAIN(int argc, char *argv[])
     #if 1
     memset(delay_data, 0, MAX_DELAY * sizeof(short));
     delay_pointer = 0;
-    delay.Delay16thBeats = 230;
-    delay.leftc = 0.5;
-    delay.rightc = 0.5;
+    delay.Delay16thBeats = 4;
+    delay.leftc = 0.3;
+    delay.rightc = 0.3;
     delay.pointer = &delay_data[MAX_DELAY / 2];
     #endif
     delay.On = 0;
