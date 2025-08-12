@@ -11,6 +11,8 @@
 #include "gdrum.h"
 #include "drum.h"
 
+int verbose = 1; // Global variable for verbosity
+
 /* Configuration */
 #define MAX_VOICE       32
 #define BUFFER_SIZE     65536 * 2 
@@ -57,7 +59,8 @@ extern int beat;
 static int left_of_block = BUFFER_SIZE;
 static int block_counter = 0;
 static unsigned char data[BUFFER_SIZE];
-static long tmpstore[SLEN];
+static long tmpstorel[SLEN];
+static long tmpstorer[SLEN];
 
 /* Delay effect */
 static short delay_data[MAX_DELAY];
@@ -69,6 +72,7 @@ typedef struct {
     int count;
     int length;
     int on;
+    int pan; // Panning for the voice
 } Voice_t;
 
 static Voice_t voices[MAX_VOICE];
@@ -91,8 +95,8 @@ void reset_voices() {
     for (int i = 0; i < MAX_VOICE; i++) {
         voices[i].on = 0;
         voices[i].pointer = NULL;
-        voices[i].count = 0;
-        voices[i].length = -1;
+        voices[i].count = -1;
+        voices[i].length = 0;
     }
 }
 static PatternRequest current_request;
@@ -166,7 +170,7 @@ int init_audio_thread(void) {
     if (audio_thread_running) {
         return 0; // Already running
     }
-    
+    reset_voices();
     audio_thread_should_stop = false;
     
     if (pthread_create(&audio_thread, NULL, audio_thread_func, NULL) != 0) {
@@ -325,7 +329,8 @@ int stop_playing(void)
     int max_j = 0;
     int crossed_limit = 0;
 
-    memset(tmpstore, 0, (BUFFER_SIZE + 1) * sizeof(long));
+    memset(tmpstorel, 0, (BUFFER_SIZE + 1) * sizeof(long));
+    memset(tmpstorer, 0, (BUFFER_SIZE + 1) * sizeof(long));
 
     /* Process remaining audio from active voices */
     for (int voi = 0; voi < MAX_VOICE; voi++) {
@@ -338,7 +343,10 @@ int stop_playing(void)
                     voices[voi].count = -1;
                     break;
                 } else {
-                    tmpstore[j] += *voices[voi].pointer;
+                    int leftc=*voices[voi].pointer;
+                    int rightc=*voices[voi].pointer;
+                    tmpstorel[j] += (long)((float)leftc * (float)(voices[voi].pan / 127.0));
+                    tmpstorer[j] += (long)((float)rightc * (float)(1.0 - voices[voi].pan / 127.0));
                     voices[voi].pointer++;
                     voices[voi].count++;
                 }
@@ -349,13 +357,14 @@ int stop_playing(void)
     /* Convert and output remaining samples */
     for (int j = 0; j < max_j; j++) {
         short sample_value;
-        if (tmpstore[j] > 32767) {
+        if (tmpstorel[j] > 32767) {
             sample_value = 32767;
-        } else if (tmpstore[j] < -32767) {
+        } else if (tmpstorel[j] < -32767) {
             sample_value = -32768;
         } else {
-            sample_value = (short)tmpstore[j];
+            sample_value = (short)tmpstorel [j];
         }
+
 
         data[block_counter] = (unsigned char)(sample_value & 0xFF);
         data[block_counter + 1] = (unsigned char)((sample_value >> 8) & 0xFF);
@@ -513,6 +522,27 @@ void close_alsa_device(void)
         pcm_handle = NULL;
     }
 }
+static int xrun_recovery(snd_pcm_t *handle, int err)
+{
+    if (verbose)
+        printf("stream recovery\n");
+    if (err == -EPIPE) {    /* under-run */
+        err = snd_pcm_prepare(handle);
+        if (err < 0)
+            printf("Can't recovery from underrun, prepare failed: %s\n", snd_strerror(err));
+        return 0;
+    } else if (err == -ESTRPIPE) {
+        while ((err = snd_pcm_resume(handle)) == -EAGAIN)
+            sleep(1);   /* wait until the suspend flag is released */
+        if (err < 0) {
+            err = snd_pcm_prepare(handle);
+            if (err < 0)
+                printf("Can't recovery from suspend, prepare failed: %s\n", snd_strerror(err));
+        }
+        return 0;
+    }
+    return err;
+}
 
 /* Write audio buffer to ALSA */
 int write_audio_buffer(int length_bytes)
@@ -529,12 +559,13 @@ int write_audio_buffer(int length_bytes)
         snd_pcm_sframes_t n = snd_pcm_writei(pcm_handle, ptr, frames_to_write);
         if (n == -EPIPE) {
             fprintf(stderr, "ALSA underrun\n");
-            snd_pcm_prepare(pcm_handle);
+            xrun_recovery(pcm_handle, n);
             continue;
         } else if (n == -EAGAIN) {
             continue;
         } else if (n < 0) {
             fprintf(stderr, "ALSA write error: %s\n", snd_strerror(n));
+            xrun_recovery(pcm_handle, n);
             return -1;
         }
         ptr += n * frame_size_bytes;
@@ -695,6 +726,7 @@ int voice_on(int drum_index)
     voices[j].pointer = Drum[drum_index].sample;
     voices[j].count = 0;
     voices[j].length = Drum[drum_index].length;
+    voices[j].pan = Drum[drum_index].pan;
 
     return j;
 }
@@ -705,7 +737,9 @@ int add_one_beat(int frames)
     int crossed_limit = 0;
 
     // tmpstore holds mono mix in 32-bit to avoid overflow, length = frames
-    memset(tmpstore, 0, frames * sizeof(long));
+    memset(tmpstorel, 0, frames * sizeof(long));
+    memset(tmpstorer, 0, frames * sizeof(long));
+
 
     // Mix voices (length and count are in samples)
     for (int voi = 0; voi < MAX_VOICE; ++voi) {
@@ -716,7 +750,8 @@ int add_one_beat(int frames)
 
             short *p = voices[voi].pointer;
             for (int j = 0; j < n; ++j) {
-                tmpstore[j] += (long)p[j];
+                tmpstorel[j] += (long)p[j]* voices[voi].pan / 127.0; // Apply panning
+                tmpstorer[j] += (long)p[j] * (1.0 - voices[voi].pan / 127.0); // Right channel
             }
 
             voices[voi].pointer += n;
@@ -730,13 +765,15 @@ int add_one_beat(int frames)
 
     // Delay tap (optional; keep simple and safe)
     if (delay.On == 1) {
+        printf("Adding delay effect\n");
         int delay_offset = (delay.Delay16thBeats * frames) / 16;
         int dp = delay_pointer - delay_offset;
         if (dp < 0) dp += MAX_DELAY;
         short *dptr = &delay_data[dp]; // local pointer for this beat
 
         for (int j = 0; j < frames; ++j) {
-            tmpstore[j] += (long)((float)dptr[0] * delay.leftc);
+            tmpstorel[j] += (long)((float)dptr[0] * delay.leftc);
+            tmpstorer[j] += (long)((float)dptr[0] * delay.rightc);
             dptr++;
             if (dptr >= &delay_data[MAX_DELAY]) dptr = &delay_data[0];
         }
@@ -744,19 +781,24 @@ int add_one_beat(int frames)
 
     // Convert to 16-bit, write L+R, update delay ring
     for (int j = 0; j < frames; ++j) {
-        long v = tmpstore[j];
+        long v = tmpstorel[j];
         if (v >  32767) v =  32767;
         if (v < -32768) v = -32768;
-        short s = (short)v;
+        short l = (short)v;
+        v = tmpstorer[j];
+        if (v >  32767) v =  32767;
+        if (v < -32768) v = -32768;
+        short r = (short)v;
 
         // write stereo: L then R (duplicate mono)
-        data[block_counter + 0] = (unsigned char)(s & 0xFF);
-        data[block_counter + 1] = (unsigned char)((s >> 8) & 0xFF);
-        data[block_counter + 2] = (unsigned char)(s & 0xFF);
-        data[block_counter + 3] = (unsigned char)((s >> 8) & 0xFF);
+
+        data[block_counter + 0] = (unsigned char)(l & 0xFF);
+        data[block_counter + 1] = (unsigned char)((l >> 8) & 0xFF);
+        data[block_counter + 2] = (unsigned char)(r & 0xFF);
+        data[block_counter + 3] = (unsigned char)((r >> 8) & 0xFF);
 
         // update delay ring with the (mono) sample
-        delay_data[delay_pointer] = s;
+        delay_data[delay_pointer] = l;
         delay_pointer = (delay_pointer + 1) % MAX_DELAY;
 
         block_counter += 4;    // 4 bytes per frame (stereo 16-bit)
