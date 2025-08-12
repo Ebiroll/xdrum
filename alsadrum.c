@@ -150,11 +150,13 @@ static void* audio_thread_func(void* arg) {
             pthread_mutex_unlock(&audio_mutex);
             if (!should_continue) {
                 printf("Stopping pattern playback\n");
+                //
             }
             
             if (!should_continue) break;
             
         } while (true);
+        stop_playing();
         
         // Pattern finished
         pthread_mutex_lock(&audio_mutex);
@@ -228,7 +230,7 @@ void StopPattern(void) {
     pthread_mutex_unlock(&audio_mutex);
     
     // Also call the existing stop function to finish audio
-    stop_playing();
+  
 }
 
 // Check if a pattern is currently playing
@@ -325,79 +327,159 @@ static void play_pattern(int patt, int measure)
 
 
 /* Stop playing and finish remaining audio */
+/* Stop playing and finish remaining audio */
 int stop_playing(void)
 {
-    int max_j = 0;
+    int max_samples_to_process = sample_rate * 2; // Process up to 2 seconds of tail
+    int samples_processed = 0;
     int crossed_limit = 0;
-
-    memset(tmpstorel, 0, (BUFFER_SIZE + 1) * sizeof(long));
-    memset(tmpstorer, 0, (BUFFER_SIZE + 1) * sizeof(long));
-
-    /* Process remaining audio from active voices */
-    for (int voi = 0; voi < MAX_VOICE; voi++) {
-        if ((voices[voi].count> -1) && voices[voi].on) {
-            for (int j = 0; j <= BUFFER_SIZE; j++) {
-                if (voices[voi].count > voices[voi].length) {
-                    if (j > max_j) {
-                        max_j = j;
-                    }
+    
+    // Process remaining audio in chunks
+    while (samples_processed < max_samples_to_process) {
+        // Check if any voices are still active
+        int active_voices = 0;
+        for (int voi = 0; voi < MAX_VOICE; voi++) {
+            if (voices[voi].count > -1) {
+                active_voices++;
+            }
+        }
+        
+        // If no active voices and delay is off or empty, we're done
+        if (active_voices == 0 && (delay.On == 0 || samples_processed > sample_rate / 4)) {
+            break;
+        }
+        
+        // Process one chunk (similar to a beat but smaller)
+        int chunk_size = 2048; // Process in small chunks for smooth fadeout
+        if (chunk_size > (max_samples_to_process - samples_processed)) {
+            chunk_size = max_samples_to_process - samples_processed;
+        }
+        
+        // Clear temporary buffers
+        memset(tmpstorel, 0, chunk_size * sizeof(long));
+        memset(tmpstorer, 0, chunk_size * sizeof(long));
+        
+        // Mix active voices
+        for (int voi = 0; voi < MAX_VOICE; voi++) {
+            if (voices[voi].count > -1) {
+                int samples_remaining = (voices[voi].length / 2) - voices[voi].count; // length is in bytes, we need samples
+                if (samples_remaining <= 0) {
                     voices[voi].count = -1;
-                    break;
-                } else {
-                    int leftc=*voices[voi].pointer;
-                    int rightc=*voices[voi].pointer;
-                    tmpstorel[j] += (long)((float)leftc * (float)(voices[voi].pan / 127.0));
-                    tmpstorer[j] += (long)((float)rightc * (float)(1.0 - voices[voi].pan / 127.0));
-                    voices[voi].pointer++;
-                    voices[voi].count++;
+                    voices[voi].on = 0;
+                    continue;
+                }
+                
+                int samples_to_process = (samples_remaining < chunk_size) ? samples_remaining : chunk_size;
+                
+                short *p = voices[voi].pointer;
+                for (int j = 0; j < samples_to_process; j++) {
+                    // Apply panning for stereo
+                    tmpstorel[j] += (long)(p[j] * voices[voi].pan / 127.0);
+                    tmpstorer[j] += (long)(p[j] * (1.0 - voices[voi].pan / 127.0));
+                }
+                
+                voices[voi].pointer += samples_to_process;
+                voices[voi].count += samples_to_process;
+                
+                // Check if voice is finished
+                if (voices[voi].count >= voices[voi].length / 2) {
+                    voices[voi].count = -1;
+                    voices[voi].on = 0;
                 }
             }
         }
-    }
-
-    /* Convert and output remaining samples */
-    for (int j = 0; j < max_j; j++) {
-        short sample_value;
-        if (tmpstorel[j] > 32767) {
-            sample_value = 32767;
-        } else if (tmpstorel[j] < -32767) {
-            sample_value = -32768;
-        } else {
-            sample_value = (short)tmpstorel [j];
+        
+        // Apply delay effect if enabled (for smooth tail)
+        if (delay.On == 1) {
+            int samples_per_16th = (sample_rate * 60) / (BPM * 4);
+            int delay_samples = delay.Delay16thBeats * samples_per_16th;
+            
+            if (delay_samples >= MAX_DELAY) {
+                delay_samples = MAX_DELAY - 1;
+            }
+            
+            for (int j = 0; j < chunk_size; j++) {
+                int read_pos = (delay_pointer + j - delay_samples) % MAX_DELAY;
+                if (read_pos < 0) {
+                    read_pos += MAX_DELAY;
+                }
+                
+                // Add delayed signal with gradual fadeout
+                float fade_factor = 1.0 - ((float)samples_processed / (float)max_samples_to_process);
+                tmpstorel[j] += (long)(delay_data[read_pos] * delay.leftc * fade_factor);
+                tmpstorer[j] += (long)(delay_data[read_pos] * delay.rightc * fade_factor);
+            }
         }
-
-
-        data[block_counter] = (unsigned char)(sample_value & 0xFF);
-        data[block_counter + 1] = (unsigned char)((sample_value >> 8) & 0xFF);
-
-        left_of_block -= 2;
-        block_counter += 2;
-
-        if (left_of_block < 1) {
-            crossed_limit = 1;
-            write_audio_buffer(block_counter);
-            left_of_block = BUFFER_SIZE;
-            block_counter = 0;
+        
+        // Convert to 16-bit stereo and output
+        for (int j = 0; j < chunk_size; j++) {
+            // Clip left channel
+            long v = tmpstorel[j];
+            if (v > 32767) v = 32767;
+            if (v < -32768) v = -32768;
+            short left_sample = (short)v;
+            
+            // Clip right channel
+            v = tmpstorer[j];
+            if (v > 32767) v = 32767;
+            if (v < -32768) v = -32768;
+            short right_sample = (short)v;
+            
+            // Write STEREO output (both channels)
+            data[block_counter] = (unsigned char)(left_sample & 0xFF);
+            data[block_counter + 1] = (unsigned char)((left_sample >> 8) & 0xFF);
+            data[block_counter + 2] = (unsigned char)(right_sample & 0xFF);
+            data[block_counter + 3] = (unsigned char)((right_sample >> 8) & 0xFF);
+            
+            // Update delay buffer (with fadeout)
+            if (delay.On == 1) {
+                float fade_factor = 1.0 - ((float)samples_processed / (float)max_samples_to_process);
+                delay_data[delay_pointer] = (short)((left_sample + right_sample) / 2 * fade_factor);
+                delay_pointer = (delay_pointer + 1) % MAX_DELAY;
+            }
+            
+            block_counter += 4;  // 4 bytes for stereo frame
+            left_of_block -= 4;
+            
+            if (left_of_block < 4) {
+                crossed_limit = 1;
+                write_audio_buffer(block_counter);
+                left_of_block = BUFFER_SIZE;
+                block_counter = 0;
+            }
         }
+        
+        samples_processed += chunk_size;
     }
-
-    /* Fill rest with silence */
-    while (left_of_block > 0) {
-        data[block_counter] = 0;
-        data[block_counter + 1] = 0;
-        left_of_block -= 2;
-        block_counter += 2;
+    
+    // Flush any remaining data in the buffer
+    if (block_counter > 0) {
+        // Pad with silence to make a complete frame if needed
+        while (block_counter % 4 != 0) {
+            data[block_counter++] = 0;
+        }
+        write_audio_buffer(block_counter);
+        block_counter = 0;
+        left_of_block = BUFFER_SIZE;
     }
-
-    write_audio_buffer(block_counter);
+    
+    // Reset everything for next play
     beat = 0;
-
-    /* Clear delay buffer */
+    
+    // Reset all voices
+    for (int i = 0; i < MAX_VOICE; i++) {
+        voices[i].count = -1;
+        voices[i].on = 0;
+        voices[i].pointer = NULL;
+        voices[i].length = 0;
+    }
+    
+    // Clear delay buffer
     memset(delay_data, 0, MAX_DELAY * sizeof(short));
-
+    delay_pointer = 0;
+    
     return crossed_limit;
 }
-
 
 unsigned long GetUpdateIntervall(int PattI)  {
   return (unsigned long)(800 * 60 / BPM);
